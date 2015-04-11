@@ -1,15 +1,16 @@
 "use strict";
 
 // Matter.js module aliases
-var Engine = Matter.Engine,
-    World = Matter.World,
-    Bodies = Matter.Bodies,
-    Composite = Matter.Composite,
-    Body = Matter.Body,
-    Events = Matter.Events;
+var worldWidth = 800;
+var worldHeight = 600;
 
-var worldWidth = 800,
-    worldHeight = 600;
+var Engine = Matter.Engine;
+var World = Matter.World;
+var Bodies = Matter.Bodies;
+var Body = Matter.Body;
+var Events = Matter.Events;
+var Query = Matter.Query;
+var Composite = Matter.Composite;
 
 // create a Matter.js engine
 var engine = Engine.create(document.body, {
@@ -17,7 +18,7 @@ var engine = Engine.create(document.body, {
         options: {
             width: worldWidth,
             height: worldHeight,
-            background: 'darkRed',
+            background: '/images/stars.jpg',
             wireframes: false
         }
     }
@@ -81,16 +82,43 @@ Events.on(engine, 'tick', function (event) {
             break;
         }
     }
+
+    var hitground = Query.region([ship], ground.bounds);
+    var top = ship.position.y;
+
+    if(hitground.length || top <= 20) {
+        ship.render.sprite.texture = '/images/explosion.png';
+        ship.isStatic=true
+        // Body.resetForcesAll(ship);
+    }
+
 });
 
+// create two boxes and a ground
+var ship = Bodies.rectangle(400, 60, 40, 40, {
+    id: "ship",
+    frictionAir: 0.05,
+    render: {
+        sprite: {
+            texture: '/images/ship.png'
+        }
+    }
+});
+var ground = Bodies.rectangle(400, 610, 810, 60, { isStatic: true });
 
-var jumper;
-Events.on(engine, 'mousedown', function(event) {
-    var mousePosition = event.mouse.position;
-    // jumper.force = {
-    //     x: 0.001,
-    //     y: -0.51
-    // };
+// add all of the bodies to the world
+World.add(engine.world, [ship, ground]);
+
+document.addEventListener("keydown", function(event){
+    var key = event.which;
+
+    if(key !== 38) {
+        return;
+    }
+
+    event.preventDefault();
+    moveShipUp();
+
 });
 
 // run the engine
@@ -125,7 +153,7 @@ function addTerrain(numBodies) {
                 buildingProp.y,
                 buildingProp.width,
                 buildingProp.height,
-                { isStatic: true, id: "building", friction: 0.001, render: { fillStyle: j === 1 ? 'green' : 'blue' } }
+                { isStatic: true, id: "building", friction: 0.1, render: { fillStyle: j === 1 ? 'green' : 'blue' } }
             );
 
             terrainBodies.push(terrainBody);
@@ -147,4 +175,8 @@ function addTerrain(numBodies) {
 
 function randomIntFromInterval(min, max) {
     return Math.floor(Math.random() * (max - min + 1) + min);
+}
+
+function moveShipUp (direction) {
+    Body.applyForce(ship, {x: 0, y: 0}, {x: 0, y: -0.1});
 }
