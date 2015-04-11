@@ -1,5 +1,5 @@
 /**
-* matter.js 0.8.0-edge 2015-01-21
+* matter-0.8.0.js 0.8.0-alpha 2014-05-04
 * http://brm.io/matter-js/
 * License: MIT
 */
@@ -41,13 +41,9 @@ var Matter = {};
 // Begin src/body/Body.js
 
 /**
-* The `Matter.Body` module contains methods for creating and manipulating body models.
-* A `Matter.Body` is a rigid body that can be simulated by a `Matter.Engine`.
-* Factories for commonly used body configurations (such as rectangles, circles and other polygons) can be found in the module `Matter.Bodies`.
-*
 * See [Demo.js](https://github.com/liabru/matter-js/blob/master/demo/js/Demo.js) 
 * and [DemoMobile.js](https://github.com/liabru/matter-js/blob/master/demo/js/DemoMobile.js) for usage examples.
-
+*
 * @class Body
 */
 
@@ -55,16 +51,10 @@ var Body = {};
 
 (function() {
 
-    Body._inertiaScale = 4;
-
-    var _nextCollidingGroupId = 1,
-        _nextNonCollidingGroupId = -1,
-        _nextCategory = 0x0001;
+    var _nextGroupId = 1;
 
     /**
-     * Creates a new rigid body model. The options parameter is an object that specifies any properties you wish to override the defaults.
-     * All properties have default values, and many are pre-calculated automatically based on other properties.
-     * See the properites section below for detailed information on what you can pass via the `options` object.
+     * Description to be written.
      * @method create
      * @param {} options
      * @return {body} body
@@ -93,11 +83,7 @@ var Body = {};
             restitution: 0,
             friction: 0.1,
             frictionAir: 0.01,
-            collisionFilter: {
-                category: 0x0001,
-                mask: 0xFFFFFFFF,
-                group: 0
-            },
+            groupId: 0,
             slop: 0.05,
             timeScale: 1,
             render: {
@@ -112,140 +98,56 @@ var Body = {};
 
         var body = Common.extend(defaults, options);
 
-        _initProperties(body, options);
+        _initProperties(body);
 
         return body;
     };
 
     /**
-     * Returns the next unique group index for which bodies will collide.
-     * If `isNonColliding` is `true`, returns the next unique group index for which bodies will _not_ collide.
-     * See `body.collisionFilter` for more information.
-     * @method nextGroup
-     * @param {bool} [isNonColliding=false]
-     * @return {Number} Unique group index
+     * Description
+     * @method nextGroupId
+     * @return {Number} Unique groupID
      */
-    Body.nextGroup = function(isNonColliding) {
-        if (isNonColliding)
-            return _nextNonCollidingGroupId--;
-
-        return _nextCollidingGroupId++;
+    Body.nextGroupId = function() {
+        return _nextGroupId++;
     };
 
     /**
-     * Returns the next unique category bitfield (starting after the initial default category `0x0001`).
-     * There are 32 available. See `body.collisionFilter` for more information.
-     * @method nextCategory
-     * @return {Number} Unique category bitfield
-     */
-    Body.nextCategory = function() {
-        _nextCategory = _nextCategory << 1;
-        return _nextCategory;
-    };
-
-    /**
-     * Initialises body properties.
+     * Initialises body properties
      * @method _initProperties
      * @private
      * @param {body} body
-     * @param {} options
      */
-    var _initProperties = function(body, options) {
-        // init required properties
-        Body.set(body, {
-            bounds: body.bounds || Bounds.create(body.vertices),
-            positionPrev: body.positionPrev || Vector.clone(body.position),
-            anglePrev: body.anglePrev || body.angle,
-            vertices: body.vertices,
-            isStatic: body.isStatic,
-            isSleeping: body.isSleeping
-        });
+    var _initProperties = function(body) {
+        // calculated properties
+        body.axes = body.axes || Axes.fromVertices(body.vertices);
+        body.area = Vertices.area(body.vertices);
+        body.bounds = Bounds.create(body.vertices);
+        body.mass = body.mass || (body.density * body.area);
+        body.inverseMass = 1 / body.mass;
+        body.inertia = body.inertia || Vertices.inertia(body.vertices, body.mass);
+        body.inverseInertia = 1 / body.inertia;
+        body.positionPrev = body.positionPrev || { x: body.position.x, y: body.position.y };
+        body.anglePrev = body.anglePrev || body.angle;
+        body.render.fillStyle = body.render.fillStyle || (body.isStatic ? '#eeeeee' : Common.choose(['#556270', '#4ECDC4', '#C7F464', '#FF6B6B', '#C44D58']));
+        body.render.strokeStyle = body.render.strokeStyle || Common.shadeColor(body.render.fillStyle, -20);
 
+        // update geometry
+        Vertices.create(body.vertices, body);
+        var centre = Vertices.centre(body.vertices);
+        Vertices.translate(body.vertices, body.position);
+        Vertices.translate(body.vertices, centre, -1);
         Vertices.rotate(body.vertices, body.angle, body.position);
         Axes.rotate(body.axes, body.angle);
         Bounds.update(body.bounds, body.vertices, body.velocity);
 
-        // allow options to override the automatically calculated properties
-        Body.set(body, {
-            axes: options.axes || body.axes,
-            area: options.area || body.area,
-            mass: options.mass || body.mass,
-            inertia: options.inertia || body.inertia
-        });
-
-        // render properties
-        var defaultFillStyle = (body.isStatic ? '#eeeeee' : Common.choose(['#556270', '#4ECDC4', '#C7F464', '#FF6B6B', '#C44D58'])),
-            defaultStrokeStyle = Common.shadeColor(defaultFillStyle, -20);
-        body.render.fillStyle = body.render.fillStyle || defaultFillStyle;
-        body.render.strokeStyle = body.render.strokeStyle || defaultStrokeStyle;
+        Body.setStatic(body, body.isStatic);
+        Sleeping.set(body, body.isSleeping);
     };
 
     /**
-     * Given a property and a value (or map of), sets the property(s) on the body, using the appropriate setter functions if they exist.
-     * Prefer to use the actual setter functions in performance critical situations.
-     * @method set
-     * @param {body} body
-     * @param {} settings A property name (or map of properties and values) to set on the body.
-     * @param {} value The value to set if `settings` is a single property name.
-     */
-    Body.set = function(body, settings, value) {
-        var property;
-
-        if (typeof settings === 'string') {
-            property = settings;
-            settings = {};
-            settings[property] = value;
-        }
-
-        for (property in settings) {
-            value = settings[property];
-
-            if (!settings.hasOwnProperty(property))
-                continue;
-
-            switch (property) {
-
-            case 'isStatic':
-                Body.setStatic(body, value);
-                break;
-            case 'isSleeping':
-                Sleeping.set(body, value);
-                break;
-            case 'mass':
-                Body.setMass(body, value);
-                break;
-            case 'density':
-                Body.setDensity(body, value);
-                break;
-            case 'inertia':
-                Body.setInertia(body, value);
-                break;
-            case 'vertices':
-                Body.setVertices(body, value);
-                break;
-            case 'position':
-                Body.setPosition(body, value);
-                break;
-            case 'angle':
-                Body.setAngle(body, value);
-                break;
-            case 'velocity':
-                Body.setVelocity(body, value);
-                break;
-            case 'angularVelocity':
-                Body.setAngularVelocity(body, value);
-                break;
-            default:
-                body[property] = value;
-
-            }
-        }
-    };
-
-    /**
-     * Sets the body as static, including isStatic flag and setting mass and inertia to Infinity.
+     * Sets the body as static, including isStatic flag and setting mass and inertia to Infinity
      * @method setStatic
-     * @param {body} body
      * @param {bool} isStatic
      */
     Body.setStatic = function(body, isStatic) {
@@ -256,6 +158,7 @@ var Body = {};
             body.friction = 1;
             body.mass = body.inertia = body.density = Infinity;
             body.inverseMass = body.inverseInertia = 0;
+            body.render.lineWidth = 1;
 
             body.positionPrev.x = body.position.x;
             body.positionPrev.y = body.position.y;
@@ -268,186 +171,68 @@ var Body = {};
     };
 
     /**
-     * Sets the mass of the body. Inverse mass and density are automatically updated to reflect the change.
-     * @method setMass
-     * @param {body} body
-     * @param {number} mass
+     * Description
+     * @method resetForcesAll
+     * @param {body[]} bodies
      */
-    Body.setMass = function(body, mass) {
-        body.mass = mass;
-        body.inverseMass = 1 / body.mass;
-        body.density = body.mass / body.area;
-    };
+    Body.resetForcesAll = function(bodies) {
+        for (var i = 0; i < bodies.length; i++) {
+            var body = bodies[i];
 
-    /**
-     * Sets the density of the body. Mass is automatically updated to reflect the change.
-     * @method setDensity
-     * @param {body} body
-     * @param {number} density
-     */
-    Body.setDensity = function(body, density) {
-        Body.setMass(body, density * body.area);
-        body.density = density;
-    };
-
-    /**
-     * Sets the moment of inertia (i.e. second moment of area) of the body of the body. 
-     * Inverse inertia is automatically updated to reflect the change. Mass is not changed.
-     * @method setInertia
-     * @param {body} body
-     * @param {number} inertia
-     */
-    Body.setInertia = function(body, inertia) {
-        body.inertia = inertia;
-        body.inverseInertia = 1 / body.inertia;
-    };
-
-    /**
-     * Sets the body's vertices and updates body properties accordingly, including inertia, area and mass (with respect to `body.density`).
-     * Vertices will be automatically transformed to be orientated around their centre of mass as the origin.
-     * They are then automatically translated to world space based on `body.position`.
-     *
-     * The `vertices` argument should be passed as an array of `Matter.Vector` points (or a `Matter.Vertices` array).
-     * Vertices must form a convex hull, concave hulls are not supported.
-     *
-     * @method setVertices
-     * @param {body} body
-     * @param {vector[]} vertices
-     */
-    Body.setVertices = function(body, vertices) {
-        // change vertices
-        if (vertices[0].body === body) {
-            body.vertices = vertices;
-        } else {
-            body.vertices = Vertices.create(vertices, body);
+            // reset force buffers
+            body.force.x = 0;
+            body.force.y = 0;
+            body.torque = 0;
         }
-
-        // update properties
-        body.axes = Axes.fromVertices(body.vertices);
-        body.area = Vertices.area(body.vertices);
-        Body.setMass(body, body.density * body.area);
-
-        // orient vertices around the centre of mass at origin (0, 0)
-        var centre = Vertices.centre(body.vertices);
-        Vertices.translate(body.vertices, centre, -1);
-
-        // update inertia while vertices are at origin (0, 0)
-        Body.setInertia(body, Body._inertiaScale * Vertices.inertia(body.vertices, body.mass));
-
-        // update geometry
-        Vertices.translate(body.vertices, body.position);
-        Bounds.update(body.bounds, body.vertices, body.velocity);
     };
 
     /**
-     * Sets the position of the body instantly. Velocity, angle, force etc. are unchanged.
-     * @method setPosition
-     * @param {body} body
-     * @param {vector} position
+     * Description
+     * @method applyGravityAll
+     * @param {body[]} bodies
+     * @param {vector} gravity
      */
-    Body.setPosition = function(body, position) {
-        var delta = Vector.sub(position, body.position);
+    Body.applyGravityAll = function(bodies, gravity) {
+        for (var i = 0; i < bodies.length; i++) {
+            var body = bodies[i];
 
-        body.position.x = position.x;
-        body.position.y = position.y;
-        body.positionPrev.x += delta.x;
-        body.positionPrev.y += delta.y;
+            if (body.isStatic || body.isSleeping)
+                continue;
 
-        Vertices.translate(body.vertices, delta);
-        Bounds.update(body.bounds, body.vertices, body.velocity);
+            // apply gravity
+            body.force.y += body.mass * gravity.y * 0.001;
+            body.force.x += body.mass * gravity.x * 0.001;
+        }
     };
 
     /**
-     * Sets the angle of the body instantly. Angular velocity, position, force etc. are unchanged.
-     * @method setAngle
-     * @param {body} body
-     * @param {number} angle
+     * Description
+     * @method updateAll
+     * @param {body[]} bodies
+     * @param {number} deltaTime
+     * @param {number} timeScale
+     * @param {number} correction
+     * @param {bounds} worldBounds
      */
-    Body.setAngle = function(body, angle) {
-        var delta = angle - body.angle;
+    Body.updateAll = function(bodies, deltaTime, timeScale, correction, worldBounds) {
+        for (var i = 0; i < bodies.length; i++) {
+            var body = bodies[i];
 
-        body.angle = angle;
-        body.anglePrev += delta;
+            if (body.isStatic || body.isSleeping)
+                continue;
 
-        Vertices.rotate(body.vertices, delta, body.position);
-        Axes.rotate(body.axes, delta);
-        Bounds.update(body.bounds, body.vertices, body.velocity);
+            // don't update out of world bodies
+            // TODO: viewports
+            if (body.bounds.max.x < worldBounds.min.x || body.bounds.min.x > worldBounds.max.x
+                || body.bounds.max.y < worldBounds.min.y || body.bounds.min.y > worldBounds.max.y)
+                continue;
+
+            Body.update(body, deltaTime, timeScale, correction);
+        }
     };
 
     /**
-     * Sets the linear velocity of the body instantly. Position, angle, force etc. are unchanged. See also `Body.applyForce`.
-     * @method setVelocity
-     * @param {body} body
-     * @param {vector} velocity
-     */
-    Body.setVelocity = function(body, velocity) {
-        body.positionPrev.x = body.position.x - velocity.x;
-        body.positionPrev.y = body.position.y - velocity.y;
-        body.velocity.x = velocity.x;
-        body.velocity.y = velocity.y;
-        body.speed = Vector.magnitude(body.velocity);
-    };
-
-    /**
-     * Sets the angular velocity of the body instantly. Position, angle, force etc. are unchanged. See also `Body.applyForce`.
-     * @method setAngularVelocity
-     * @param {body} body
-     * @param {number} velocity
-     */
-    Body.setAngularVelocity = function(body, velocity) {
-        body.anglePrev = body.angle - velocity;
-        body.angularVelocity = velocity;
-        body.angularSpeed = Math.abs(body.angularVelocity);
-    };
-
-    /**
-     * Moves a body by a given vector relative to its current position, without imparting any velocity.
-     * @method translate
-     * @param {body} body
-     * @param {vector} translation
-     */
-    Body.translate = function(body, translation) {
-        Body.setPosition(body, Vector.add(body.position, translation));
-    };
-
-    /**
-     * Rotates a body by a given angle relative to its current angle, without imparting any angular velocity.
-     * @method rotate
-     * @param {body} body
-     * @param {number} rotation
-     */
-    Body.rotate = function(body, rotation) {
-        Body.setAngle(body, body.angle + rotation);
-    };
-
-    /**
-     * Scales the body, including updating physical properties (mass, area, axes, inertia), from a world-space point (default is body centre).
-     * @method scale
-     * @param {body} body
-     * @param {number} scaleX
-     * @param {number} scaleY
-     * @param {vector} [point]
-     */
-    Body.scale = function(body, scaleX, scaleY, point) {
-        // scale vertices
-        Vertices.scale(body.vertices, scaleX, scaleY, point);
-
-        // update properties
-        body.axes = Axes.fromVertices(body.vertices);
-        body.area = Vertices.area(body.vertices);
-        Body.setMass(body, body.density * body.area);
-
-        // update inertia (requires vertices to be at origin)
-        Vertices.translate(body.vertices, { x: -body.position.x, y: -body.position.y });
-        Body.setInertia(body, Vertices.inertia(body.vertices, body.mass));
-        Vertices.translate(body.vertices, { x: body.position.x, y: body.position.y });
-
-        // update bounds
-        Bounds.update(body.bounds, body.vertices, body.velocity);
-    };
-
-    /**
-     * Performs a simulation step for the given `body`, including updating position and angle using Verlet integration.
+     * Description
      * @method update
      * @param {body} body
      * @param {number} deltaTime
@@ -490,7 +275,7 @@ var Body = {};
     };
 
     /**
-     * Applies a force to a body from a given world-space position, including resulting torque.
+     * Description
      * @method applyForce
      * @param {body} body
      * @param {vector} position
@@ -503,413 +288,64 @@ var Body = {};
         body.torque += (offset.x * force.y - offset.y * force.x) * body.inverseInertia;
     };
 
-    /*
-    *
-    *  Properties Documentation
-    *
-    */
+    /**
+     * Description
+     * @method translate
+     * @param {body} body
+     * @param {vector} translation
+     */
+    Body.translate = function(body, translation) {
+        body.positionPrev.x += translation.x;
+        body.positionPrev.y += translation.y;
+        body.position.x += translation.x;
+        body.position.y += translation.y;
+        Vertices.translate(body.vertices, translation);
+        Bounds.update(body.bounds, body.vertices, body.velocity);
+    };
 
     /**
-     * An integer `Number` uniquely identifying number generated in `Body.create` by `Common.nextId`.
-     *
-     * @property id
-     * @type number
+     * Description
+     * @method rotate
+     * @param {body} body
+     * @param {number} angle
      */
+    Body.rotate = function(body, angle) {
+        body.anglePrev += angle;
+        body.angle += angle;
+        Vertices.rotate(body.vertices, angle, body.position);
+        Axes.rotate(body.axes, angle);
+        Bounds.update(body.bounds, body.vertices, body.velocity);
+    };
 
     /**
-     * A `String` denoting the type of object.
-     *
-     * @property type
-     * @type string
-     * @default "body"
+     * Scales the body, including updating physical properties (mass, area, axes, inertia), from a point (default is centre)
+     * @method translate
+     * @param {body} body
+     * @param {number} scaleX
+     * @param {number} scaleY
+     * @param {vector} point
      */
+    Body.scale = function(body, scaleX, scaleY, point) {
+        // scale vertices
+        Vertices.scale(body.vertices, scaleX, scaleY, point);
 
-    /**
-     * An arbitrary `String` name to help the user identify and manage bodies.
-     *
-     * @property label
-     * @type string
-     * @default "Body"
-     */
+        // update properties
+        body.axes = Axes.fromVertices(body.vertices);
+        body.area = Vertices.area(body.vertices);
+        body.mass = body.density * body.area;
+        body.inverseMass = 1 / body.mass;
 
-    /**
-     * A `Number` specifying the angle of the body, in radians.
-     *
-     * @property angle
-     * @type number
-     * @default 0
-     */
+        // update inertia (requires vertices to be at origin)
+        Vertices.translate(body.vertices, { x: -body.position.x, y: -body.position.y });
+        body.inertia = Vertices.inertia(body.vertices, body.mass);
+        body.inverseInertia = 1 / body.inertia;
+        Vertices.translate(body.vertices, { x: body.position.x, y: body.position.y });
 
-    /**
-     * An array of `Vector` objects that specify the convex hull of the rigid body.
-     * These should be provided about the origin `(0, 0)`. E.g.
-     *
-     *     [{ x: 0, y: 0 }, { x: 25, y: 50 }, { x: 50, y: 0 }]
-     *
-     * When passed via `Body.create`, the verticies are translated relative to `body.position` (i.e. world-space, and constantly updated by `Body.update` during simulation).
-     * The `Vector` objects are also augmented with additional properties required for efficient collision detection. 
-     *
-     * Other properties such as `inertia` and `bounds` are automatically calculated from the passed vertices (unless provided via `options`).
-     * Concave hulls are not currently supported. The module `Matter.Vertices` contains useful methods for working with vertices.
-     *
-     * @property vertices
-     * @type vector[]
-     */
-
-    /**
-     * A `Vector` that specifies the current world-space position of the body.
-     *
-     * @property position
-     * @type vector
-     * @default { x: 0, y: 0 }
-     */
-
-    /**
-     * A `Vector` that specifies the force to apply in the current step. It is zeroed after every `Body.update`. See also `Body.applyForce`.
-     *
-     * @property force
-     * @type vector
-     * @default { x: 0, y: 0 }
-     */
-
-    /**
-     * A `Number` that specifies the torque (turning force) to apply in the current step. It is zeroed after every `Body.update`.
-     *
-     * @property torque
-     * @type number
-     * @default 0
-     */
-
-    /**
-     * A `Number` that _measures_ the current speed of the body after the last `Body.update`. It is read-only and always positive (it's the magnitude of `body.velocity`).
-     *
-     * @readOnly
-     * @property speed
-     * @type number
-     * @default 0
-     */
-
-    /**
-     * A `Number` that _measures_ the current angular speed of the body after the last `Body.update`. It is read-only and always positive (it's the magnitude of `body.angularVelocity`).
-     *
-     * @readOnly
-     * @property angularSpeed
-     * @type number
-     * @default 0
-     */
-
-    /**
-     * A `Vector` that _measures_ the current velocity of the body after the last `Body.update`. It is read-only. 
-     * If you need to modify a body's velocity directly, you should either apply a force or simply change the body's `position` (as the engine uses position-Verlet integration).
-     *
-     * @readOnly
-     * @property velocity
-     * @type vector
-     * @default { x: 0, y: 0 }
-     */
-
-    /**
-     * A `Number` that _measures_ the current angular velocity of the body after the last `Body.update`. It is read-only. 
-     * If you need to modify a body's angular velocity directly, you should apply a torque or simply change the body's `angle` (as the engine uses position-Verlet integration).
-     *
-     * @readOnly
-     * @property angularVelocity
-     * @type number
-     * @default 0
-     */
-
-    /**
-     * A flag that indicates whether a body is considered static. A static body can never change position or angle and is completely fixed.
-     * If you need to set a body as static after its creation, you should use `Body.setStatic` as this requires more than just setting this flag.
-     *
-     * @property isStatic
-     * @type boolean
-     * @default false
-     */
-
-    /**
-     * A flag that indicates whether the body is considered sleeping. A sleeping body acts similar to a static body, except it is only temporary and can be awoken.
-     * If you need to set a body as sleeping, you should use `Sleeping.set` as this requires more than just setting this flag.
-     *
-     * @property isSleeping
-     * @type boolean
-     * @default false
-     */
-
-    /**
-     * A `Number` that _measures_ the amount of movement a body currently has (a combination of `speed` and `angularSpeed`). It is read-only and always positive.
-     * It is used and updated by the `Matter.Sleeping` module during simulation to decide if a body has come to rest.
-     *
-     * @readOnly
-     * @property motion
-     * @type number
-     * @default 0
-     */
-
-    /**
-     * A `Number` that defines the number of updates in which this body must have near-zero velocity before it is set as sleeping by the `Matter.Sleeping` module (if sleeping is enabled by the engine).
-     *
-     * @property sleepThreshold
-     * @type number
-     * @default 60
-     */
-
-    /**
-     * A `Number` that defines the density of the body, that is its mass per unit area.
-     * If you pass the density via `Body.create` the `mass` property is automatically calculated for you based on the size (area) of the object.
-     * This is generally preferable to simply setting mass and allows for more intuitive definition of materials (e.g. rock has a higher density than wood).
-     *
-     * @property density
-     * @type number
-     * @default 0.001
-     */
-
-    /**
-     * A `Number` that defines the mass of the body, although it may be more appropriate to specify the `density` property instead.
-     * If you modify this value, you must also modify the `body.inverseMass` property (`1 / mass`).
-     *
-     * @property mass
-     * @type number
-     */
-
-    /**
-     * A `Number` that defines the inverse mass of the body (`1 / mass`).
-     * If you modify this value, you must also modify the `body.mass` property.
-     *
-     * @property inverseMass
-     * @type number
-     */
-
-    /**
-     * A `Number` that defines the moment of inertia (i.e. second moment of area) of the body.
-     * It is automatically calculated from the given convex hull (`vertices` array) and density in `Body.create`.
-     * If you modify this value, you must also modify the `body.inverseInertia` property (`1 / inertia`).
-     *
-     * @property inertia
-     * @type number
-     */
-
-    /**
-     * A `Number` that defines the inverse moment of inertia of the body (`1 / inertia`).
-     * If you modify this value, you must also modify the `body.inertia` property.
-     *
-     * @property inverseInertia
-     * @type number
-     */
-
-    /**
-     * A `Number` that defines the restitution (elasticity) of the body. The value is always positive and is in the range `(0, 1)`.
-     * A value of `0` means collisions may be perfectly inelastic and no bouncing may occur. 
-     * A value of `0.8` means the body may bounce back with approximately 80% of its kinetic energy.
-     * Note that collision response is based on _pairs_ of bodies, and that `restitution` values are _combined_ with the following formula:
-     *
-     *     Math.max(bodyA.restitution, bodyB.restitution)
-     *
-     * @property restitution
-     * @type number
-     * @default 0
-     */
-
-    /**
-     * A `Number` that defines the friction of the body. The value is always positive and is in the range `(0, 1)`.
-     * A value of `0` means that the body may slide indefinitely.
-     * A value of `1` means the body may come to a stop almost instantly after a force is applied.
-     *
-     * The effects of the value may be non-linear. 
-     * High values may be unstable depending on the body.
-     * The engine uses a Coulomb friction model including static and kinetic friction.
-     * Note that collision response is based on _pairs_ of bodies, and that `friction` values are _combined_ with the following formula:
-     *
-     *     Math.min(bodyA.friction, bodyB.friction)
-     *
-     * @property friction
-     * @type number
-     * @default 0.1
-     */
-
-    /**
-     * A `Number` that defines the air friction of the body (air resistance). 
-     * A value of `0` means the body will never slow as it moves through space.
-     * The higher the value, the faster a body slows when moving through space.
-     * The effects of the value are non-linear. 
-     *
-     * @property frictionAir
-     * @type number
-     * @default 0.01
-     */
-
-    /**
-     * An `Object` that specifies the collision filtering properties of this body.
-     *
-     * Collisions between two bodies will obey the following rules:
-     * - If the two bodies have the same non-zero value of `collisionFilter.group`,
-     *   they will always collide if the value is positive, and they will never collide
-     *   if the value is negative.
-     * - If the two bodies have different values of `collisionFilter.group` or if one
-     *   (or both) of the bodies has a value of 0, then the category/mask rules apply as follows:
-     *
-     * Each body belongs to a collision category, given by `collisionFilter.category`. This
-     * value is used as a bit field and the category should have only one bit set, meaning that
-     * the value of this property is a power of two in the range [1, 2^31]. Thus, there are 32
-     * different collision categories available.
-     *
-     * Each body also defines a collision bitmask, given by `collisionFilter.mask` which specifies
-     * the categories it collides with (the value is the bitwise AND value of all these categories).
-     *
-     * Using the category/mask rules, two bodies `A` and `B` collide if each includes the other's
-     * category in its mask, i.e. `(categoryA & maskB) !== 0` and `(categoryB & maskA) !== 0`
-     * are both true.
-     *
-     * @property collisionFilter
-     * @type object
-     */
-
-    /**
-     * An Integer `Number`, that specifies the collision group this body belongs to.
-     * See `body.collisionFilter` for more information.
-     *
-     * @property collisionFilter.group
-     * @type object
-     * @default 0
-     */
-
-    /**
-     * A bit field that specifies the collision category this body belongs to.
-     * The category value should have only one bit set, for example `0x0001`.
-     * This means there are up to 32 unique collision categories available.
-     * See `body.collisionFilter` for more information.
-     *
-     * @property collisionFilter.category
-     * @type object
-     * @default 1
-     */
-
-    /**
-     * A bit mask that specifies the collision categories this body may collide with.
-     * See `body.collisionFilter` for more information.
-     *
-     * @property collisionFilter.mask
-     * @type object
-     * @default -1
-     */
-
-    /**
-     * A `Number` that specifies a tolerance on how far a body is allowed to 'sink' or rotate into other bodies.
-     * Avoid changing this value unless you understand the purpose of `slop` in physics engines.
-     * The default should generally suffice, although very large bodies may require larger values for stable stacking.
-     *
-     * @property slop
-     * @type number
-     * @default 0.05
-     */
-
-    /**
-     * A `Number` that allows per-body time scaling, e.g. a force-field where bodies inside are in slow-motion, while others are at full speed.
-     *
-     * @property timeScale
-     * @type number
-     * @default 1
-     */
-
-    /**
-     * An `Object` that defines the rendering properties to be consumed by the module `Matter.Render`.
-     *
-     * @property render
-     * @type object
-     */
-
-    /**
-     * A flag that indicates if the body should be rendered.
-     *
-     * @property render.visible
-     * @type boolean
-     * @default true
-     */
-
-    /**
-     * An `Object` that defines the sprite properties to use when rendering, if any.
-     *
-     * @property render.sprite
-     * @type object
-     */
-
-    /**
-     * An `String` that defines the path to the image to use as the sprite texture, if any.
-     *
-     * @property render.sprite.texture
-     * @type string
-     */
-     
-    /**
-     * A `Number` that defines the scaling in the x-axis for the sprite, if any.
-     *
-     * @property render.sprite.xScale
-     * @type number
-     * @default 1
-     */
-
-    /**
-     * A `Number` that defines the scaling in the y-axis for the sprite, if any.
-     *
-     * @property render.sprite.yScale
-     * @type number
-     * @default 1
-     */
-
-    /**
-     * A `Number` that defines the line width to use when rendering the body outline (if a sprite is not defined).
-     * A value of `0` means no outline will be rendered.
-     *
-     * @property render.lineWidth
-     * @type number
-     * @default 1.5
-     */
-
-    /**
-     * A `String` that defines the fill style to use when rendering the body (if a sprite is not defined).
-     * It is the same as when using a canvas, so it accepts CSS style property values.
-     *
-     * @property render.fillStyle
-     * @type string
-     * @default a random colour
-     */
-
-    /**
-     * A `String` that defines the stroke style to use when rendering the body outline (if a sprite is not defined).
-     * It is the same as when using a canvas, so it accepts CSS style property values.
-     *
-     * @property render.strokeStyle
-     * @type string
-     * @default a random colour
-     */
-
-    /**
-     * An array of unique axis vectors (edge normals) used for collision detection.
-     * These are automatically calculated from the given convex hull (`vertices` array) in `Body.create`.
-     * They are constantly updated by `Body.update` during the simulation.
-     *
-     * @property axes
-     * @type vector[]
-     */
-     
-    /**
-     * A `Number` that _measures_ the area of the body's convex hull, calculated at creation by `Body.create`.
-     *
-     * @property area
-     * @type string
-     * @default 
-     */
-
-    /**
-     * A `Bounds` object that defines the AABB region for the body.
-     * It is automatically calculated from the given convex hull (`vertices` array) in `Body.create` and constantly updated by `Body.update` during simulation.
-     *
-     * @property bounds
-     * @type bounds
-     */
+        // update bounds
+        Bounds.update(body.bounds, body.vertices, body.velocity);
+    };
 
 })();
-
 
 ;   // End src/body/Body.js
 
@@ -917,26 +353,22 @@ var Body = {};
 // Begin src/body/Composite.js
 
 /**
-* The `Matter.Composite` module contains methods for creating and manipulating composite bodies.
-* A composite body is a collection of `Matter.Body`, `Matter.Constraint` and other `Matter.Composite`, therefore composites form a tree structure.
-* It is important to use the functions in this module to modify composites, rather than directly modifying their properties.
-* Note that the `Matter.World` object is also a type of `Matter.Composite` and as such all composite methods here can also operate on a `Matter.World`.
-*
 * See [Demo.js](https://github.com/liabru/matter-js/blob/master/demo/js/Demo.js) 
 * and [DemoMobile.js](https://github.com/liabru/matter-js/blob/master/demo/js/DemoMobile.js) for usage examples.
 *
 * @class Composite
 */
 
+// TODO: composite translate, rotate
+
 var Composite = {};
 
 (function() {
 
     /**
-     * Creates a new composite. The options parameter is an object that specifies any properties you wish to override the defaults.
-     * See the properites section below for detailed information on what you can pass via the `options` object.
+     * Description
      * @method create
-     * @param {} [options]
+     * @param {} options
      * @return {composite} A new composite
      */
     Composite.create = function(options) {
@@ -959,8 +391,8 @@ var Composite = {};
      * @method setModified
      * @param {composite} composite
      * @param {boolean} isModified
-     * @param {boolean} [updateParents=false]
-     * @param {boolean} [updateChildren=false]
+     * @param {boolean} updateParents
+     * @param {boolean} updateChildren
      */
     Composite.setModified = function(composite, isModified, updateParents, updateChildren) {
         composite.isModified = isModified;
@@ -979,7 +411,6 @@ var Composite = {};
 
     /**
      * Generic add function. Adds one or many body(s), constraint(s) or a composite(s) to the given composite.
-     * Triggers `beforeAdd` and `afterAdd` events on the `composite`.
      * @method add
      * @param {composite} composite
      * @param {} object
@@ -987,8 +418,6 @@ var Composite = {};
      */
     Composite.add = function(composite, object) {
         var objects = [].concat(object);
-
-        Events.trigger(composite, 'beforeAdd', { object: object });
 
         for (var i = 0; i < objects.length; i++) {
             var obj = objects[i];
@@ -1011,25 +440,20 @@ var Composite = {};
             }
         }
 
-        Events.trigger(composite, 'afterAdd', { object: object });
-
         return composite;
     };
 
     /**
      * Generic remove function. Removes one or many body(s), constraint(s) or a composite(s) to the given composite.
      * Optionally searching its children recursively.
-     * Triggers `beforeRemove` and `afterRemove` events on the `composite`.
      * @method remove
      * @param {composite} composite
      * @param {} object
-     * @param {boolean} [deep=false]
+     * @param {boolean} deep
      * @return {composite} The original composite with the objects removed
      */
     Composite.remove = function(composite, object, deep) {
         var objects = [].concat(object);
-
-        Events.trigger(composite, 'beforeRemove', { object: object });
 
         for (var i = 0; i < objects.length; i++) {
             var obj = objects[i];
@@ -1052,14 +476,11 @@ var Composite = {};
             }
         }
 
-        Events.trigger(composite, 'afterRemove', { object: object });
-
         return composite;
     };
 
     /**
-     * Adds a composite to the given composite
-     * @private
+     * Description
      * @method addComposite
      * @param {composite} compositeA
      * @param {composite} compositeB
@@ -1074,15 +495,14 @@ var Composite = {};
 
     /**
      * Removes a composite from the given composite, and optionally searching its children recursively
-     * @private
      * @method removeComposite
      * @param {composite} compositeA
      * @param {composite} compositeB
-     * @param {boolean} [deep=false]
+     * @param {boolean} deep
      * @return {composite} The original compositeA with the composite removed
      */
     Composite.removeComposite = function(compositeA, compositeB, deep) {
-        var position = Common.indexOf(compositeA.composites, compositeB);
+        var position = compositeA.composites.indexOf(compositeB);
         if (position !== -1) {
             Composite.removeCompositeAt(compositeA, position);
             Composite.setModified(compositeA, true, true, false);
@@ -1099,7 +519,6 @@ var Composite = {};
 
     /**
      * Removes a composite from the given composite
-     * @private
      * @method removeCompositeAt
      * @param {composite} composite
      * @param {number} position
@@ -1112,8 +531,7 @@ var Composite = {};
     };
 
     /**
-     * Adds a body to the given composite
-     * @private
+     * Description
      * @method addBody
      * @param {composite} composite
      * @param {body} body
@@ -1127,15 +545,14 @@ var Composite = {};
 
     /**
      * Removes a body from the given composite, and optionally searching its children recursively
-     * @private
      * @method removeBody
      * @param {composite} composite
      * @param {body} body
-     * @param {boolean} [deep=false]
+     * @param {boolean} deep
      * @return {composite} The original composite with the body removed
      */
     Composite.removeBody = function(composite, body, deep) {
-        var position = Common.indexOf(composite.bodies, body);
+        var position = composite.bodies.indexOf(body);
         if (position !== -1) {
             Composite.removeBodyAt(composite, position);
             Composite.setModified(composite, true, true, false);
@@ -1152,7 +569,6 @@ var Composite = {};
 
     /**
      * Removes a body from the given composite
-     * @private
      * @method removeBodyAt
      * @param {composite} composite
      * @param {number} position
@@ -1165,8 +581,7 @@ var Composite = {};
     };
 
     /**
-     * Adds a constraint to the given composite
-     * @private
+     * Description
      * @method addConstraint
      * @param {composite} composite
      * @param {constraint} constraint
@@ -1180,15 +595,14 @@ var Composite = {};
 
     /**
      * Removes a constraint from the given composite, and optionally searching its children recursively
-     * @private
      * @method removeConstraint
      * @param {composite} composite
      * @param {constraint} constraint
-     * @param {boolean} [deep=false]
+     * @param {boolean} deep
      * @return {composite} The original composite with the constraint removed
      */
     Composite.removeConstraint = function(composite, constraint, deep) {
-        var position = Common.indexOf(composite.constraints, constraint);
+        var position = composite.constraints.indexOf(constraint);
         if (position !== -1) {
             Composite.removeConstraintAt(composite, position);
         }
@@ -1204,7 +618,6 @@ var Composite = {};
 
     /**
      * Removes a body from the given composite
-     * @private
      * @method removeConstraintAt
      * @param {composite} composite
      * @param {number} position
@@ -1222,7 +635,7 @@ var Composite = {};
      * @method clear
      * @param {world} world
      * @param {boolean} keepStatic
-     * @param {boolean} [deep=false]
+     * @param {boolean} deep
      */
     Composite.clear = function(composite, keepStatic, deep) {
         if (deep) {
@@ -1357,210 +770,6 @@ var Composite = {};
         return composite;
     };
 
-    /**
-     * Translates all children in the composite by a given vector relative to their current positions, 
-     * without imparting any velocity.
-     * @method translate
-     * @param {composite} composite
-     * @param {vector} translation
-     * @param {bool} [recursive=true]
-     */
-    Composite.translate = function(composite, translation, recursive) {
-        var bodies = recursive ? Composite.allBodies(composite) : composite.bodies;
-
-        for (var i = 0; i < bodies.length; i++) {
-            Body.translate(bodies[i], translation);
-        }
-
-        Composite.setModified(composite, true, true, false);
-
-        return composite;
-    };
-
-    /**
-     * Rotates all children in the composite by a given angle about the given point, without imparting any angular velocity.
-     * @method rotate
-     * @param {composite} composite
-     * @param {number} rotation
-     * @param {vector} point
-     * @param {bool} [recursive=true]
-     */
-    Composite.rotate = function(composite, rotation, point, recursive) {
-        var cos = Math.cos(rotation),
-            sin = Math.sin(rotation),
-            bodies = recursive ? Composite.allBodies(composite) : composite.bodies;
-
-        for (var i = 0; i < bodies.length; i++) {
-            var body = bodies[i],
-                dx = body.position.x - point.x,
-                dy = body.position.y - point.y;
-                
-            Body.setPosition(body, {
-                x: point.x + (dx * cos - dy * sin),
-                y: point.y + (dx * sin + dy * cos)
-            });
-
-            Body.rotate(body, rotation);
-        }
-
-        Composite.setModified(composite, true, true, false);
-
-        return composite;
-    };
-
-    /**
-     * Scales all children in the composite, including updating physical properties (mass, area, axes, inertia), from a world-space point.
-     * @method scale
-     * @param {composite} composite
-     * @param {number} scaleX
-     * @param {number} scaleY
-     * @param {vector} point
-     * @param {bool} [recursive=true]
-     */
-    Composite.scale = function(composite, scaleX, scaleY, point, recursive) {
-        var bodies = recursive ? Composite.allBodies(composite) : composite.bodies;
-
-        for (var i = 0; i < bodies.length; i++) {
-            var body = bodies[i],
-                dx = body.position.x - point.x,
-                dy = body.position.y - point.y;
-                
-            Body.setPosition(body, {
-                x: point.x + dx * scaleX,
-                y: point.y + dy * scaleY
-            });
-
-            Body.scale(body, scaleX, scaleY);
-        }
-
-        Composite.setModified(composite, true, true, false);
-
-        return composite;
-    };
-
-    /*
-    *
-    *  Events Documentation
-    *
-    */
-
-    /**
-    * Fired when a call to `Composite.add` is made, before objects have been added.
-    *
-    * @event beforeAdd
-    * @param {} event An event object
-    * @param {} event.object The object(s) to be added (may be a single body, constraint, composite or a mixed array of these)
-    * @param {} event.source The source object of the event
-    * @param {} event.name The name of the event
-    */
-
-    /**
-    * Fired when a call to `Composite.add` is made, after objects have been added.
-    *
-    * @event afterAdd
-    * @param {} event An event object
-    * @param {} event.object The object(s) that have been added (may be a single body, constraint, composite or a mixed array of these)
-    * @param {} event.source The source object of the event
-    * @param {} event.name The name of the event
-    */
-
-    /**
-    * Fired when a call to `Composite.remove` is made, before objects have been removed.
-    *
-    * @event beforeRemove
-    * @param {} event An event object
-    * @param {} event.object The object(s) to be removed (may be a single body, constraint, composite or a mixed array of these)
-    * @param {} event.source The source object of the event
-    * @param {} event.name The name of the event
-    */
-
-    /**
-    * Fired when a call to `Composite.remove` is made, after objects have been removed.
-    *
-    * @event afterRemove
-    * @param {} event An event object
-    * @param {} event.object The object(s) that have been removed (may be a single body, constraint, composite or a mixed array of these)
-    * @param {} event.source The source object of the event
-    * @param {} event.name The name of the event
-    */
-
-    /*
-    *
-    *  Properties Documentation
-    *
-    */
-
-    /**
-     * An integer `Number` uniquely identifying number generated in `Composite.create` by `Common.nextId`.
-     *
-     * @property id
-     * @type number
-     */
-
-    /**
-     * A `String` denoting the type of object.
-     *
-     * @property type
-     * @type string
-     * @default "composite"
-     */
-
-    /**
-     * An arbitrary `String` name to help the user identify and manage composites.
-     *
-     * @property label
-     * @type string
-     * @default "Composite"
-     */
-
-    /**
-     * A flag that specifies whether the composite has been modified during the current step.
-     * Most `Matter.Composite` methods will automatically set this flag to `true` to inform the engine of changes to be handled.
-     * If you need to change it manually, you should use the `Composite.setModified` method.
-     *
-     * @property isModified
-     * @type boolean
-     * @default false
-     */
-
-    /**
-     * The `Composite` that is the parent of this composite. It is automatically managed by the `Matter.Composite` methods.
-     *
-     * @property parent
-     * @type composite
-     * @default null
-     */
-
-    /**
-     * An array of `Body` that are _direct_ children of this composite.
-     * To add or remove bodies you should use `Composite.add` and `Composite.remove` methods rather than directly modifying this property.
-     * If you wish to recursively find all descendants, you should use the `Composite.allBodies` method.
-     *
-     * @property bodies
-     * @type body[]
-     * @default []
-     */
-
-    /**
-     * An array of `Constraint` that are _direct_ children of this composite.
-     * To add or remove constraints you should use `Composite.add` and `Composite.remove` methods rather than directly modifying this property.
-     * If you wish to recursively find all descendants, you should use the `Composite.allConstraints` method.
-     *
-     * @property constraints
-     * @type constraint[]
-     * @default []
-     */
-
-    /**
-     * An array of `Composite` that are _direct_ children of this composite.
-     * To add or remove composites you should use `Composite.add` and `Composite.remove` methods rather than directly modifying this property.
-     * If you wish to recursively find all descendants, you should use the `Composite.allComposites` method.
-     *
-     * @property composites
-     * @type composite[]
-     * @default []
-     */
-
 })();
 
 ;   // End src/body/Composite.js
@@ -1569,12 +778,6 @@ var Composite = {};
 // Begin src/body/World.js
 
 /**
-* The `Matter.World` module contains methods for creating and manipulating the world composite.
-* A `Matter.World` is a `Matter.Composite` body, which is a collection of `Matter.Body`, `Matter.Constraint` and other `Matter.Composite`.
-* A `Matter.World` has a few additional properties including `gravity` and `bounds`.
-* It is important to use the functions in the `Matter.Composite` module to modify the world composite, rather than directly modifying its properties.
-* There are also a few methods here that alias those in `Matter.Composite` for easier readability.
-*
 * See [Demo.js](https://github.com/liabru/matter-js/blob/master/demo/js/Demo.js) 
 * and [DemoMobile.js](https://github.com/liabru/matter-js/blob/master/demo/js/DemoMobile.js) for usage examples.
 *
@@ -1586,8 +789,7 @@ var World = {};
 (function() {
 
     /**
-     * Creates a new world composite. The options parameter is an object that specifies any properties you wish to override the defaults.
-     * See the properites section below for detailed information on what you can pass via the `options` object.
+     * Description
      * @method create
      * @constructor
      * @param {} options
@@ -1612,14 +814,14 @@ var World = {};
     // see src/module/Outro.js for these aliases:
     
     /**
-     * An alias for Composite.clear since World is also a Composite
+     * An alias for Composite.clear since World is also a Composite (see Outro.js)
      * @method clear
      * @param {world} world
      * @param {boolean} keepStatic
      */
 
     /**
-     * An alias for Composite.add since World is also a Composite
+     * An alias for Composite.add since World is also a Composite (see Outro.js)
      * @method addComposite
      * @param {world} world
      * @param {composite} composite
@@ -1627,7 +829,7 @@ var World = {};
      */
     
      /**
-      * An alias for Composite.addBody since World is also a Composite
+      * An alias for Composite.addBody since World is also a Composite (see Outro.js)
       * @method addBody
       * @param {world} world
       * @param {body} body
@@ -1635,7 +837,7 @@ var World = {};
       */
 
      /**
-      * An alias for Composite.addConstraint since World is also a Composite
+      * An alias for Composite.addConstraint since World is also a Composite (see Outro.js)
       * @method addConstraint
       * @param {world} world
       * @param {constraint} constraint
@@ -1678,14 +880,13 @@ var Contact = {};
      * Description
      * @method id
      * @param {vertex} vertex
-     * @return {string} Unique contactID
+     * @return {Number} Unique contactID
      */
     Contact.id = function(vertex) {
         return vertex.body.id + '_' + vertex.index;
     };
 
 })();
-
 
 ;   // End src/collision/Contact.js
 
@@ -1720,10 +921,12 @@ var Detector = {};
             var bodyA = broadphasePairs[i][0], 
                 bodyB = broadphasePairs[i][1];
 
-            if ((bodyA.isStatic || bodyA.isSleeping) && (bodyB.isStatic || bodyB.isSleeping))
+            // NOTE: could share a function for the below, but may drop performance?
+
+            if (bodyA.groupId && bodyB.groupId && bodyA.groupId === bodyB.groupId)
                 continue;
-            
-            if (!Detector.canCollide(bodyA.collisionFilter, bodyB.collisionFilter))
+
+            if ((bodyA.isStatic || bodyA.isSleeping) && (bodyB.isStatic || bodyB.isSleeping))
                 continue;
 
             metrics.midphaseTests += 1;
@@ -1779,10 +982,10 @@ var Detector = {};
 
                 // NOTE: could share a function for the below, but may drop performance?
 
-                if ((bodyA.isStatic || bodyA.isSleeping) && (bodyB.isStatic || bodyB.isSleeping))
+                if (bodyA.groupId && bodyB.groupId && bodyA.groupId === bodyB.groupId)
                     continue;
-                
-                if (!Detector.canCollide(bodyA.collisionFilter, bodyB.collisionFilter))
+
+                if ((bodyA.isStatic || bodyA.isSleeping) && (bodyB.isStatic || bodyB.isSleeping))
                     continue;
 
                 metrics.midphaseTests += 1;
@@ -1820,23 +1023,7 @@ var Detector = {};
         return collisions;
     };
 
-    /**
-     * Returns `true` if both supplied collision filters will allow a collision to occur.
-     * See `body.collisionFilter` for more information.
-     * @method canCollide
-     * @param {} filterA
-     * @param {} filterB
-     * @return {bool} `true` if collision can occur
-     */
-    Detector.canCollide = function(filterA, filterB) {
-        if (filterA.group === filterB.group && filterA.group !== 0)
-            return filterA.group > 0;
-
-        return (filterA.mask & filterB.category) !== 0 && (filterB.mask & filterA.category) !== 0;
-    };
-
 })();
-
 
 ;   // End src/collision/Detector.js
 
@@ -1857,21 +1044,18 @@ var Grid = {};
     /**
      * Description
      * @method create
-     * @param {} options
+     * @param {number} bucketWidth
+     * @param {number} bucketHeight
      * @return {grid} A new grid
      */
-    Grid.create = function(options) {
-        var defaults = {
-            controller: Grid,
-            detector: Detector.collisions,
+    Grid.create = function(bucketWidth, bucketHeight) {
+        return {
             buckets: {},
             pairs: {},
             pairsList: [],
-            bucketWidth: 48,
-            bucketHeight: 48
+            bucketWidth: bucketWidth || 48,
+            bucketHeight: bucketHeight || 48
         };
-
-        return Common.extend(defaults, options);
     };
 
     /**
@@ -2092,7 +1276,7 @@ var Grid = {};
      */
     var _bucketRemoveBody = function(grid, bucket, body) {
         // remove from bucket
-        bucket.splice(Common.indexOf(bucket, body), 1);
+        bucket.splice(bucket.indexOf(body), 1);
 
         // update pair counts
         for (var i = 0; i < bucket.length; i++) {
@@ -2198,10 +1382,6 @@ var Pair = {};
             activeContacts = pair.activeContacts;
         
         pair.collision = collision;
-        pair.inverseMass = collision.bodyA.inverseMass + collision.bodyB.inverseMass;
-        pair.friction = Math.min(collision.bodyA.friction, collision.bodyB.friction);
-        pair.restitution = Math.max(collision.bodyA.restitution, collision.bodyB.restitution);
-        pair.slop = Math.max(collision.bodyA.slop, collision.bodyB.slop);
         activeContacts.length = 0;
         
         if (collision.collided) {
@@ -2246,7 +1426,7 @@ var Pair = {};
      * @method id
      * @param {body} bodyA
      * @param {body} bodyB
-     * @return {string} Unique pairId
+     * @return {number} Unique pairId
      */
     Pair.id = function(bodyA, bodyB) {
         if (bodyA.id < bodyB.id) {
@@ -2257,7 +1437,6 @@ var Pair = {};
     };
 
 })();
-
 
 ;   // End src/collision/Pair.js
 
@@ -2351,7 +1530,7 @@ var Pairs = {};
         // deactivate previously active pairs that are now inactive
         for (i = 0; i < pairsList.length; i++) {
             pair = pairsList[i];
-            if (pair.isActive && Common.indexOf(activePairIds, pair.id) === -1) {
+            if (pair.isActive && activePairIds.indexOf(pair.id) === -1) {
                 Pair.setActive(pair, false, timestamp);
                 collisionEnd.push(pair);
             }
@@ -2420,7 +1599,7 @@ var Pairs = {};
 // Begin src/collision/Query.js
 
 /**
-* The `Matter.Query` module contains methods for performing collision queries.
+* Functions for performing collision queries
 *
 * @class Query
 */
@@ -2435,7 +1614,6 @@ var Query = {};
      * @param {body[]} bodies
      * @param {vector} startPoint
      * @param {vector} endPoint
-     * @param {number} [rayWidth]
      * @return {object[]} Collisions
      */
     Query.ray = function(bodies, startPoint, endPoint, rayWidth) {
@@ -2464,11 +1642,11 @@ var Query = {};
     };
 
     /**
-     * Returns all bodies whose bounds are inside (or outside if set) the given set of bounds, from the given set of bodies.
+     * Returns all bodies whose bounds are inside (or outside if set) the given set of bounds, from the given set of bodies
      * @method region
      * @param {body[]} bodies
      * @param {bounds} bounds
-     * @param {bool} [outside=false]
+     * @param {bool} outside
      * @return {body[]} The bodies matching the query
      */
     Query.region = function(bodies, bounds, outside) {
@@ -2875,33 +2053,24 @@ var SAT = {};
 
         // find support points, there is always either exactly one or two
         var verticesB = _findSupports(bodyA, bodyB, collision.normal),
-            supports = collision.supports || [];
-        supports.length = 0;
-
-        // find the supports from bodyB that are inside bodyA
-        if (Vertices.contains(bodyA.vertices, verticesB[0]))
-            supports.push(verticesB[0]);
-
-        if (Vertices.contains(bodyA.vertices, verticesB[1]))
-            supports.push(verticesB[1]);
-
-        // find the supports from bodyA that are inside bodyB
-        if (supports.length < 2) {
-            var verticesA = _findSupports(bodyB, bodyA, Vector.neg(collision.normal));
-                
-            if (Vertices.contains(bodyB.vertices, verticesA[0]))
-                supports.push(verticesA[0]);
-
-            if (supports.length < 2 && Vertices.contains(bodyB.vertices, verticesA[1]))
-                supports.push(verticesA[1]);
-        }
-
-        // account for the edge case of overlapping but no vertex containment
-        if (supports.length < 2)
             supports = [verticesB[0]];
         
+        if (Vertices.contains(bodyA.vertices, verticesB[1])) {
+            supports.push(verticesB[1]);
+        } else {
+            var verticesA = _findSupports(bodyB, bodyA, Vector.neg(collision.normal));
+            
+            if (Vertices.contains(bodyB.vertices, verticesA[0])) {
+                supports.push(verticesA[0]);
+            }
+
+            if (supports.length < 2 && Vertices.contains(bodyB.vertices, verticesA[1])) {
+                supports.push(verticesA[1]);
+            }
+        }
+        
         collision.supports = supports;
-        collision.supportCorrected = Vector.sub(supports[0], collision.penetration);
+        collision.supportCorrected = Vector.sub(verticesB[0], collision.penetration);
 
         return collision;
     };
@@ -3019,6 +2188,7 @@ var SAT = {};
         vertexToBody.y = vertex.y - bodyAPosition.y;
         distance = -Vector.dot(normal, vertexToBody);
         if (distance < nearestDistance) {
+            nearestDistance = distance;
             vertexB = vertex;
         }
 
@@ -3027,17 +2197,12 @@ var SAT = {};
 
 })();
 
-
 ;   // End src/collision/SAT.js
 
 
 // Begin src/constraint/Constraint.js
 
 /**
-* The `Matter.Constraint` module contains methods for creating and manipulating constraints.
-* Constraints are used for specifying that a fixed distance must be maintained between two bodies (or a body and a fixed world-space position).
-* The stiffness of constraints can be modified to create springs or elastic.
-*
 * See [Demo.js](https://github.com/liabru/matter-js/blob/master/demo/js/Demo.js) 
 * and [DemoMobile.js](https://github.com/liabru/matter-js/blob/master/demo/js/DemoMobile.js) for usage examples.
 *
@@ -3060,9 +2225,7 @@ var Constraint = {};
         _minDifference = 0.001;
 
     /**
-     * Creates a new constraint.
-     * All properties have default values, and many are pre-calculated automatically based on other properties.
-     * See the properites section below for detailed information on what you can pass via the `options` object.
+     * Description
      * @method create
      * @param {} options
      * @return {constraint} constraint
@@ -3106,7 +2269,6 @@ var Constraint = {};
 
     /**
      * Description
-     * @private
      * @method solveAll
      * @param {constraint[]} constraints
      * @param {number} timeScale
@@ -3119,7 +2281,6 @@ var Constraint = {};
 
     /**
      * Description
-     * @private
      * @method solve
      * @param {constraint} constraint
      * @param {number} timeScale
@@ -3274,7 +2435,6 @@ var Constraint = {};
 
     /**
      * Performs body updates required after solving constraints
-     * @private
      * @method postSolveAll
      * @param {body[]} bodies
      */
@@ -3299,118 +2459,6 @@ var Constraint = {};
         }
     };
 
-    /*
-    *
-    *  Properties Documentation
-    *
-    */
-
-    /**
-     * An integer `Number` uniquely identifying number generated in `Composite.create` by `Common.nextId`.
-     *
-     * @property id
-     * @type number
-     */
-
-    /**
-     * A `String` denoting the type of object.
-     *
-     * @property type
-     * @type string
-     * @default "constraint"
-     */
-
-    /**
-     * An arbitrary `String` name to help the user identify and manage bodies.
-     *
-     * @property label
-     * @type string
-     * @default "Constraint"
-     */
-
-    /**
-     * An `Object` that defines the rendering properties to be consumed by the module `Matter.Render`.
-     *
-     * @property render
-     * @type object
-     */
-
-    /**
-     * A flag that indicates if the constraint should be rendered.
-     *
-     * @property render.visible
-     * @type boolean
-     * @default true
-     */
-
-    /**
-     * A `Number` that defines the line width to use when rendering the constraint outline.
-     * A value of `0` means no outline will be rendered.
-     *
-     * @property render.lineWidth
-     * @type number
-     * @default 2
-     */
-
-    /**
-     * A `String` that defines the stroke style to use when rendering the constraint outline.
-     * It is the same as when using a canvas, so it accepts CSS style property values.
-     *
-     * @property render.strokeStyle
-     * @type string
-     * @default a random colour
-     */
-
-    /**
-     * The first possible `Body` that this constraint is attached to.
-     *
-     * @property bodyA
-     * @type body
-     * @default null
-     */
-
-    /**
-     * The second possible `Body` that this constraint is attached to.
-     *
-     * @property bodyB
-     * @type body
-     * @default null
-     */
-
-    /**
-     * A `Vector` that specifies the offset of the constraint from center of the `constraint.bodyA` if defined, otherwise a world-space position.
-     *
-     * @property pointA
-     * @type vector
-     * @default { x: 0, y: 0 }
-     */
-
-    /**
-     * A `Vector` that specifies the offset of the constraint from center of the `constraint.bodyA` if defined, otherwise a world-space position.
-     *
-     * @property pointB
-     * @type vector
-     * @default { x: 0, y: 0 }
-     */
-
-    /**
-     * A `Number` that specifies the stiffness of the constraint, i.e. the rate at which it returns to its resting `constraint.length`.
-     * A value of `1` means the constraint should be very stiff.
-     * A value of `0.2` means the constraint acts like a soft spring.
-     *
-     * @property stiffness
-     * @type number
-     * @default 1
-     */
-
-    /**
-     * A `Number` that specifies the target resting length of the constraint. 
-     * It is calculated automatically in `Constraint.create` from intial positions of the `constraint.bodyA` and `constraint.bodyB`.
-     *
-     * @property length
-     * @type number
-     */
-
 })();
 
 ;   // End src/constraint/Constraint.js
@@ -3419,9 +2467,6 @@ var Constraint = {};
 // Begin src/constraint/MouseConstraint.js
 
 /**
-* The `Matter.MouseConstraint` module contains methods for creating mouse constraints.
-* Mouse constraints are used for allowing user interaction, providing the ability to move bodies via the mouse or touch.
-*
 * See [Demo.js](https://github.com/liabru/matter-js/blob/master/demo/js/Demo.js) 
 * and [DemoMobile.js](https://github.com/liabru/matter-js/blob/master/demo/js/DemoMobile.js) for usage examples.
 *
@@ -3433,23 +2478,14 @@ var MouseConstraint = {};
 (function() {
 
     /**
-     * Creates a new mouse constraint.
-     * All properties have default values, and many are pre-calculated automatically based on other properties.
-     * See the properites section below for detailed information on what you can pass via the `options` object.
+     * Description
      * @method create
      * @param {engine} engine
      * @param {} options
      * @return {MouseConstraint} A new MouseConstraint
      */
     MouseConstraint.create = function(engine, options) {
-        var mouse = (engine ? engine.mouse : null) || (options ? options.mouse : null);
-
-        if (!mouse && engine && engine.render && engine.render.canvas) {
-            mouse = Mouse.create(engine.render.canvas);
-        } else {
-            mouse = Mouse.create();
-            Common.log('MouseConstraint.create: options.mouse was undefined, engine.render.canvas was undefined, may not function as expected', 'warn');
-        }
+        var mouse = engine.input.mouse;
 
         var constraint = Constraint.create({ 
             label: 'Mouse Constraint',
@@ -3467,197 +2503,57 @@ var MouseConstraint = {};
         var defaults = {
             type: 'mouseConstraint',
             mouse: mouse,
-            body: null,
-            constraint: constraint,
-            collisionFilter: {
-                category: 0x0001,
-                mask: 0xFFFFFFFF,
-                group: 0
-            }
+            dragBody: null,
+            dragPoint: null,
+            constraint: constraint
         };
 
         var mouseConstraint = Common.extend(defaults, options);
 
-        Events.on(engine, 'tick', function() {
+        Events.on(engine, 'tick', function(event) {
             var allBodies = Composite.allBodies(engine.world);
             MouseConstraint.update(mouseConstraint, allBodies);
-            _triggerEvents(mouseConstraint);
         });
 
         return mouseConstraint;
     };
 
     /**
-     * Updates the given mouse constraint.
-     * @private
+     * Description
      * @method update
      * @param {MouseConstraint} mouseConstraint
      * @param {body[]} bodies
      */
     MouseConstraint.update = function(mouseConstraint, bodies) {
         var mouse = mouseConstraint.mouse,
-            constraint = mouseConstraint.constraint,
-            body = mouseConstraint.body;
+            constraint = mouseConstraint.constraint;
 
         if (mouse.button === 0) {
             if (!constraint.bodyB) {
                 for (var i = 0; i < bodies.length; i++) {
-                    body = bodies[i];
+                    var body = bodies[i];
                     if (Bounds.contains(body.bounds, mouse.position) 
-                            && Vertices.contains(body.vertices, mouse.position)
-                            && Detector.canCollide(body.collisionFilter, mouseConstraint.collisionFilter)) {
-                       
+                            && Vertices.contains(body.vertices, mouse.position)) {
                         constraint.pointA = mouse.position;
-                        constraint.bodyB = mouseConstraint.body = body;
+                        constraint.bodyB = body;
                         constraint.pointB = { x: mouse.position.x - body.position.x, y: mouse.position.y - body.position.y };
                         constraint.angleB = body.angle;
-
                         Sleeping.set(body, false);
-                        Events.trigger(mouseConstraint, 'startdrag', { mouse: mouse, body: body });
                     }
                 }
-            } else {
-                Sleeping.set(constraint.bodyB, false);
-                constraint.pointA = mouse.position;
             }
         } else {
-            constraint.bodyB = mouseConstraint.body = null;
+            constraint.bodyB = null;
             constraint.pointB = null;
+        }
 
-            if (body)
-                Events.trigger(mouseConstraint, 'enddrag', { mouse: mouse, body: body });
+        if (constraint.bodyB) {
+            Sleeping.set(constraint.bodyB, false);
+            constraint.pointA = mouse.position;
         }
     };
 
-    /**
-     * Triggers mouse constraint events
-     * @method _triggerEvents
-     * @private
-     * @param {mouse} mouse
-     */
-    var _triggerEvents = function(mouseConstraint) {
-        var mouse = mouseConstraint.mouse,
-            mouseEvents = mouse.sourceEvents;
-
-        if (mouseEvents.mousemove)
-            Events.trigger(mouseConstraint, 'mousemove', { mouse: mouse });
-
-        if (mouseEvents.mousedown)
-            Events.trigger(mouseConstraint, 'mousedown', { mouse: mouse });
-
-        if (mouseEvents.mouseup)
-            Events.trigger(mouseConstraint, 'mouseup', { mouse: mouse });
-
-        // reset the mouse state ready for the next step
-        Mouse.clearSourceEvents(mouse);
-    };
-
-    /*
-    *
-    *  Events Documentation
-    *
-    */
-
-    /**
-    * Fired when the mouse has moved (or a touch moves) during the last step
-    *
-    * @event mousemove
-    * @param {} event An event object
-    * @param {mouse} event.mouse The engine's mouse instance
-    * @param {} event.source The source object of the event
-    * @param {} event.name The name of the event
-    */
-
-    /**
-    * Fired when the mouse is down (or a touch has started) during the last step
-    *
-    * @event mousedown
-    * @param {} event An event object
-    * @param {mouse} event.mouse The engine's mouse instance
-    * @param {} event.source The source object of the event
-    * @param {} event.name The name of the event
-    */
-
-    /**
-    * Fired when the mouse is up (or a touch has ended) during the last step
-    *
-    * @event mouseup
-    * @param {} event An event object
-    * @param {mouse} event.mouse The engine's mouse instance
-    * @param {} event.source The source object of the event
-    * @param {} event.name The name of the event
-    */
-
-    /**
-    * Fired when the user starts dragging a body
-    *
-    * @event startdrag
-    * @param {} event An event object
-    * @param {mouse} event.mouse The engine's mouse instance
-    * @param {body} event.body The body being dragged
-    * @param {} event.source The source object of the event
-    * @param {} event.name The name of the event
-    */
-
-    /**
-    * Fired when the user ends dragging a body
-    *
-    * @event enddrag
-    * @param {} event An event object
-    * @param {mouse} event.mouse The engine's mouse instance
-    * @param {body} event.body The body that has stopped being dragged
-    * @param {} event.source The source object of the event
-    * @param {} event.name The name of the event
-    */
-
-    /*
-    *
-    *  Properties Documentation
-    *
-    */
-
-    /**
-     * A `String` denoting the type of object.
-     *
-     * @property type
-     * @type string
-     * @default "constraint"
-     */
-
-    /**
-     * The `Mouse` instance in use. If not supplied in `MouseConstraint.create`, one will be created.
-     *
-     * @property mouse
-     * @type mouse
-     * @default mouse
-     */
-
-    /**
-     * The `Body` that is currently being moved by the user, or `null` if no body.
-     *
-     * @property body
-     * @type body
-     * @default null
-     */
-
-    /**
-     * The `Constraint` object that is used to move the body during interaction.
-     *
-     * @property constraint
-     * @type constraint
-     */
-
-    /**
-     * An `Object` that specifies the collision filter properties.
-     * The collision filter allows the user to define which types of body this mouse constraint can interact with.
-     * See `body.collisionFilter` for more information.
-     *
-     * @property collisionFilter
-     * @type object
-     */
-
 })();
-
 
 ;   // End src/constraint/MouseConstraint.js
 
@@ -3675,7 +2571,6 @@ var Common = {};
 (function() {
 
     Common._nextId = 0;
-    Common._seed = 0;
 
     /**
      * Description
@@ -3799,7 +2694,7 @@ var Common = {};
      */
     Common.shuffle = function(array) {
         for (var i = array.length - 1; i > 0; i--) {
-            var j = Math.floor(Common.random() * (i + 1));
+            var j = Math.floor(Math.random() * (i + 1));
             var temp = array[i];
             array[i] = array[j];
             array[j] = temp;
@@ -3814,7 +2709,7 @@ var Common = {};
      * @return {object} A random choice object from the array
      */
     Common.choose = function(choices) {
-        return choices[Math.floor(Common.random() * choices.length)];
+        return choices[Math.floor(Math.random() * choices.length)];
     };
 
     /**
@@ -3889,9 +2784,7 @@ var Common = {};
      * @return {number} A random number between min and max inclusive
      */
     Common.random = function(min, max) {
-        min = (typeof min !== "undefined") ? min : 0;
-        max = (typeof max !== "undefined") ? max : 1;
-        return min + _seededRandom() * (max - min);
+        return min + Math.random() * (max - min);
     };
 
     /**
@@ -3919,7 +2812,7 @@ var Common = {};
      * @param {string} type
      */
     Common.log = function(message, type) {
-        if (!console || !console.log || !console.warn)
+        if (!console || !console.log)
             return;
 
         var style;
@@ -3927,13 +2820,15 @@ var Common = {};
         switch (type) {
 
         case 'warn':
-            console.warn('Matter.js:', message);
+            style = 'color: coral';
             break;
         case 'error':
-            console.log('Matter.js:', message);
+            style = 'color: red';
             break;
 
         }
+
+        console.log('%c [Matter] ' + type + ': ' + message, style);
     };
 
     /**
@@ -3945,30 +2840,6 @@ var Common = {};
         return Common._nextId++;
     };
 
-    /**
-     * A cross browser compatible indexOf implementation
-     * @method indexOf
-     * @param {array} haystack
-     * @param {object} needle
-     */
-    Common.indexOf = function(haystack, needle) {
-        if (haystack.indexOf)
-            return haystack.indexOf(needle);
-
-        for (var i = 0; i < haystack.length; i++) {
-            if (haystack[i] === needle)
-                return i;
-        }
-
-        return -1;
-    };
-
-    var _seededRandom = function() {
-        // https://gist.github.com/ngryman/3830489
-        Common._seed = (Common._seed * 9301 + 49297) % 233280;
-        return Common._seed / 233280;
-    };
-
 })();
 
 ;   // End src/core/Common.js
@@ -3977,30 +2848,31 @@ var Common = {};
 // Begin src/core/Engine.js
 
 /**
-* The `Matter.Engine` module contains methods for creating and manipulating engines.
-* An engine is a controller that manages updating and rendering the simulation of the world.
-* See `Matter.Runner` for an optional game loop utility.
-*
 * See [Demo.js](https://github.com/liabru/matter-js/blob/master/demo/js/Demo.js) 
 * and [DemoMobile.js](https://github.com/liabru/matter-js/blob/master/demo/js/DemoMobile.js) for usage examples.
 *
 * @class Engine
 */
 
+// TODO: viewports
+
 var Engine = {};
 
 (function() {
 
     var _fps = 60,
+        _deltaSampleSize = _fps,
         _delta = 1000 / _fps;
-
+        
+    var _requestAnimationFrame = window.requestAnimationFrame || window.webkitRequestAnimationFrame
+                                      || window.mozRequestAnimationFrame || window.msRequestAnimationFrame 
+                                      || function(callback){ window.setTimeout(function() { callback(Common.now()); }, _delta); };
+   
     /**
-     * Creates a new engine. The options parameter is an object that specifies any properties you wish to override the defaults.
-     * All properties have default values, and many are pre-calculated automatically based on other properties.
-     * See the properites section below for detailed information on what you can pass via the `options` object.
+     * Description
      * @method create
      * @param {HTMLElement} element
-     * @param {object} [options]
+     * @param {object} options
      * @return {engine} engine
      */
     Engine.create = function(element, options) {
@@ -4015,6 +2887,8 @@ var Engine = {};
             velocityIterations: 4,
             constraintIterations: 2,
             enableSleeping: false,
+            timeScale: 1,
+            input: {},
             events: [],
             timing: {
                 fps: _fps,
@@ -4024,15 +2898,11 @@ var Engine = {};
                 deltaMin: 1000 / _fps,
                 deltaMax: 1000 / (_fps * 0.5),
                 timeScale: 1,
-                isFixed: false,
-                frameRequestId: 0
+                isFixed: false
             },
             render: {
                 element: element,
                 controller: Render
-            },
-            broadphase: {
-                controller: Grid
             }
         };
         
@@ -4042,26 +2912,130 @@ var Engine = {};
         engine.world = World.create(engine.world);
         engine.pairs = Pairs.create();
         engine.metrics = engine.metrics || Metrics.create();
-        engine.broadphase = engine.broadphase.controller.create(engine.broadphase);
+        engine.input.mouse = engine.input.mouse || Mouse.create(engine.render.canvas);
+
+        engine.broadphase = engine.broadphase || {
+            current: 'grid',
+            grid: {
+                controller: Grid,
+                instance: Grid.create(),
+                detector: Detector.collisions
+            },
+            bruteForce: {
+                detector: Detector.bruteForce
+            }
+        };
 
         return engine;
     };
 
     /**
-     * Moves the simulation forward in time by `delta` ms. 
-     * Triggers `beforeUpdate` and `afterUpdate` events.
-     * Triggers `collisionStart`, `collisionActive` and `collisionEnd` events.
+     * An optional utility function that provides a game loop, that handles updating the engine for you.
+     * Calls `Engine.update` and `Engine.render` on the `requestAnimationFrame` event automatically.
+     * Handles time correction and non-fixed dynamic timing (if enabled). 
+     * Triggers `beforeTick`, `tick` and `afterTick` events.
+     * @method run
+     * @param {engine} engine
+     */
+    Engine.run = function(engine) {
+        var counterTimestamp = 0,
+            frameCounter = 0,
+            deltaHistory = [],
+            timePrev,
+            timeScalePrev = 1;
+
+        (function render(time){
+            _requestAnimationFrame(render);
+
+            if (!engine.enabled)
+                return;
+
+            var timing = engine.timing,
+                delta,
+                correction;
+
+            // create an event object
+            var event = {
+                timestamp: time
+            };
+
+            Events.trigger(engine, 'beforeTick', event);
+
+            if (timing.isFixed) {
+                // fixed timestep
+                delta = timing.delta;
+            } else {
+                // dynamic timestep based on wall clock between calls
+                delta = (time - timePrev) || timing.delta;
+                timePrev = time;
+
+                // optimistically filter delta over a few frames, to improve stability
+                deltaHistory.push(delta);
+                deltaHistory = deltaHistory.slice(-_deltaSampleSize);
+                delta = Math.min.apply(null, deltaHistory);
+                
+                // limit delta
+                delta = delta < timing.deltaMin ? timing.deltaMin : delta;
+                delta = delta > timing.deltaMax ? timing.deltaMax : delta;
+
+                // time correction for delta
+                correction = delta / timing.delta;
+
+                // update engine timing object
+                timing.delta = delta;
+            }
+
+            // time correction for time scaling
+            if (timeScalePrev !== 0)
+                correction *= timing.timeScale / timeScalePrev;
+
+            if (timing.timeScale === 0)
+                correction = 0;
+
+            timeScalePrev = timing.timeScale;
+            
+            // fps counter
+            frameCounter += 1;
+            if (time - counterTimestamp >= 1000) {
+                timing.fps = frameCounter * ((time - counterTimestamp) / 1000);
+                counterTimestamp = time;
+                frameCounter = 0;
+            }
+
+            Events.trigger(engine, 'tick', event);
+
+            // if world has been modified, clear the render scene graph
+            if (engine.world.isModified)
+                engine.render.controller.clear(engine.render);
+
+            // update
+            Engine.update(engine, delta, correction);
+
+            // trigger events that may have occured during the step
+            _triggerCollisionEvents(engine);
+            _triggerMouseEvents(engine);
+
+            // render
+            Engine.render(engine);
+
+            Events.trigger(engine, 'afterTick', event);
+        })();
+    };
+
+    /**
+     * Moves the simulation forward in time by `delta` ms. Triggers `beforeUpdate` and `afterUpdate` events.
      * @method update
      * @param {engine} engine
      * @param {number} delta
-     * @param {number} [correction]
+     * @param {number} correction
+     * @return engine
      */
     Engine.update = function(engine, delta, correction) {
         correction = (typeof correction !== 'undefined') ? correction : 1;
 
         var world = engine.world,
             timing = engine.timing,
-            broadphase = engine.broadphase,
+            broadphase = engine.broadphase[engine.broadphase.current],
             broadphasePairs = [],
             i;
 
@@ -4085,13 +3059,13 @@ var Engine = {};
 
         // if sleeping enabled, call the sleeping controller
         if (engine.enableSleeping)
-            Sleeping.update(allBodies, timing.timeScale);
+            Sleeping.update(allBodies);
 
         // applies gravity to all bodies
-        _bodiesApplyGravity(allBodies, world.gravity);
+        Body.applyGravityAll(allBodies, world.gravity);
 
         // update all body position and rotation by integration
-        _bodiesUpdate(allBodies, delta, timing.timeScale, correction, world.bounds);
+        Body.updateAll(allBodies, delta, timing.timeScale, correction, world.bounds);
 
         // update all constraints
         for (i = 0; i < engine.constraintIterations; i++) {
@@ -4104,11 +3078,11 @@ var Engine = {};
 
             // if world is dirty, we must flush the whole grid
             if (world.isModified)
-                broadphase.controller.clear(broadphase);
+                broadphase.controller.clear(broadphase.instance);
 
             // update the grid buckets based on current bodies
-            broadphase.controller.update(broadphase, allBodies, engine, world.isModified);
-            broadphasePairs = broadphase.pairsList;
+            broadphase.controller.update(broadphase.instance, allBodies, engine, world.isModified);
+            broadphasePairs = broadphase.instance.pairsList;
         } else {
 
             // if no broadphase set, we just pass all bodies
@@ -4126,11 +3100,7 @@ var Engine = {};
 
         // wake up bodies involved in collisions
         if (engine.enableSleeping)
-            Sleeping.afterCollisions(pairs.list, timing.timeScale);
-
-        // trigger collision events
-        if (pairs.collisionStart.length > 0)
-            Events.trigger(engine, 'collisionStart', { pairs: pairs.collisionStart });
+            Sleeping.afterCollisions(pairs.list);
 
         // iteratively resolve velocity between collisions
         Resolver.preSolveVelocity(pairs.list);
@@ -4144,18 +3114,11 @@ var Engine = {};
         }
         Resolver.postSolvePosition(allBodies);
 
-        // trigger collision events
-        if (pairs.collisionActive.length > 0)
-            Events.trigger(engine, 'collisionActive', { pairs: pairs.collisionActive });
-
-        if (pairs.collisionEnd.length > 0)
-            Events.trigger(engine, 'collisionEnd', { pairs: pairs.collisionEnd });
-
         // update metrics log
         Metrics.update(engine.metrics, engine);
 
         // clear force buffers
-        _bodiesClearForces(allBodies);
+        Body.resetForcesAll(allBodies);
 
         // clear all composite modified flags
         if (world.isModified)
@@ -4184,7 +3147,7 @@ var Engine = {};
     };
     
     /**
-     * Merges two engines by keeping the configuration of `engineA` but replacing the world with the one from `engineB`.
+     * Description
      * @method merge
      * @param {engine} engineA
      * @param {engine} engineB
@@ -4208,7 +3171,7 @@ var Engine = {};
     };
 
     /**
-     * Clears the engine including the world, pairs and broadphase.
+     * Description
      * @method clear
      * @param {engine} engine
      */
@@ -4217,84 +3180,73 @@ var Engine = {};
         
         Pairs.clear(engine.pairs);
 
-        var broadphase = engine.broadphase;
+        var broadphase = engine.broadphase[engine.broadphase.current];
         if (broadphase.controller) {
             var bodies = Composite.allBodies(world);
-            broadphase.controller.clear(broadphase);
-            broadphase.controller.update(broadphase, bodies, engine, true);
+            broadphase.controller.clear(broadphase.instance);
+            broadphase.controller.update(broadphase.instance, bodies, engine, true);
         }
     };
 
     /**
-     * Zeroes the `body.force` and `body.torque` force buffers.
-     * @method bodiesClearForces
+     * Triggers mouse events
+     * @method _triggerMouseEvents
      * @private
-     * @param {body[]} bodies
-     */
-    var _bodiesClearForces = function(bodies) {
-        for (var i = 0; i < bodies.length; i++) {
-            var body = bodies[i];
-
-            // reset force buffers
-            body.force.x = 0;
-            body.force.y = 0;
-            body.torque = 0;
-        }
-    };
-
-    /**
-     * Applys a mass dependant force to all given bodies.
-     * @method bodiesApplyGravity
-     * @private
-     * @param {body[]} bodies
-     * @param {vector} gravity
-     */
-    var _bodiesApplyGravity = function(bodies, gravity) {
-        for (var i = 0; i < bodies.length; i++) {
-            var body = bodies[i];
-
-            if (body.isStatic || body.isSleeping)
-                continue;
-
-            // apply gravity
-            body.force.y += body.mass * gravity.y * 0.001;
-            body.force.x += body.mass * gravity.x * 0.001;
-        }
-    };
-
-    /**
-     * Applys `Body.update` to all given `bodies`.
-     * @method updateAll
-     * @private
-     * @param {body[]} bodies
-     * @param {number} deltaTime 
-     * The amount of time elapsed between updates
-     * @param {number} timeScale
-     * @param {number} correction 
-     * The Verlet correction factor (deltaTime / lastDeltaTime)
-     * @param {bounds} worldBounds
-     */
-    var _bodiesUpdate = function(bodies, deltaTime, timeScale, correction, worldBounds) {
-        for (var i = 0; i < bodies.length; i++) {
-            var body = bodies[i];
-
-            if (body.isStatic || body.isSleeping)
-                continue;
-
-            // don't update out of world bodies
-            if (body.bounds.max.x < worldBounds.min.x || body.bounds.min.x > worldBounds.max.x
-                || body.bounds.max.y < worldBounds.min.y || body.bounds.min.y > worldBounds.max.y)
-                continue;
-
-            Body.update(body, deltaTime, timeScale, correction);
-        }
-    };
-
-    /**
-     * An alias for `Runner.run`, see `Matter.Runner` for more information.
-     * @method run
      * @param {engine} engine
      */
+    var _triggerMouseEvents = function(engine) {
+        var mouse = engine.input.mouse,
+            mouseEvents = mouse.sourceEvents;
+
+        if (mouseEvents.mousemove) {
+            Events.trigger(engine, 'mousemove', {
+                mouse: mouse
+            });
+        }
+
+        if (mouseEvents.mousedown) {
+            Events.trigger(engine, 'mousedown', {
+                mouse: mouse
+            });
+        }
+
+        if (mouseEvents.mouseup) {
+            Events.trigger(engine, 'mouseup', {
+                mouse: mouse
+            });
+        }
+
+        // reset the mouse state ready for the next step
+        Mouse.clearSourceEvents(mouse);
+    };
+
+    /**
+     * Triggers collision events
+     * @method _triggerMouseEvents
+     * @private
+     * @param {engine} engine
+     */
+    var _triggerCollisionEvents = function(engine) {
+        var pairs = engine.pairs;
+
+        if (pairs.collisionStart.length > 0) {
+            Events.trigger(engine, 'collisionStart', {
+                pairs: pairs.collisionStart
+            });
+        }
+
+        if (pairs.collisionActive.length > 0) {
+            Events.trigger(engine, 'collisionActive', {
+                pairs: pairs.collisionActive
+            });
+        }
+
+        if (pairs.collisionEnd.length > 0) {
+            Events.trigger(engine, 'collisionEnd', {
+                pairs: pairs.collisionEnd
+            });
+        }
+    };
 
     /*
     *
@@ -4373,6 +3325,36 @@ var Engine = {};
     */
 
     /**
+    * Fired when the mouse has moved (or a touch moves) during the last step
+    *
+    * @event mousemove
+    * @param {} event An event object
+    * @param {mouse} event.mouse The engine's mouse instance
+    * @param {} event.source The source object of the event
+    * @param {} event.name The name of the event
+    */
+
+    /**
+    * Fired when the mouse is down (or a touch has started) during the last step
+    *
+    * @event mousedown
+    * @param {} event An event object
+    * @param {mouse} event.mouse The engine's mouse instance
+    * @param {} event.source The source object of the event
+    * @param {} event.name The name of the event
+    */
+
+    /**
+    * Fired when the mouse is up (or a touch has ended) during the last step
+    *
+    * @event mouseup
+    * @param {} event An event object
+    * @param {mouse} event.mouse The engine's mouse instance
+    * @param {} event.source The source object of the event
+    * @param {} event.name The name of the event
+    */
+
+    /**
     * Fired after engine update, provides a list of all pairs that have started to collide in the current tick (if any)
     *
     * @event collisionStart
@@ -4405,145 +3387,6 @@ var Engine = {};
     * @param {} event.name The name of the event
     */
 
-    /*
-    *
-    *  Properties Documentation
-    *
-    */
-
-    /**
-     * A flag that specifies whether the engine is running or not.
-     *
-     * @property enabled
-     * @type boolean
-     * @default true
-     */
-
-    /**
-     * An integer `Number` that specifies the number of position iterations to perform each update.
-     * The higher the value, the higher quality the simulation will be at the expense of performance.
-     *
-     * @property positionIterations
-     * @type number
-     * @default 6
-     */
-
-    /**
-     * An integer `Number` that specifies the number of velocity iterations to perform each update.
-     * The higher the value, the higher quality the simulation will be at the expense of performance.
-     *
-     * @property velocityIterations
-     * @type number
-     * @default 4
-     */
-
-    /**
-     * An integer `Number` that specifies the number of constraint iterations to perform each update.
-     * The higher the value, the higher quality the simulation will be at the expense of performance.
-     * The default value of `2` is usually very adequate.
-     *
-     * @property constraintIterations
-     * @type number
-     * @default 2
-     */
-
-    /**
-     * A flag that specifies whether the engine should allow sleeping via the `Matter.Sleeping` module.
-     * Sleeping can improve stability and performance, but often at the expense of accuracy.
-     *
-     * @property enableSleeping
-     * @type boolean
-     * @default false
-     */
-
-    /**
-     * An `Object` containing properties regarding the timing systems of the engine. 
-     *
-     * @property timing
-     * @type object
-     */
-
-    /**
-     * A `Number` that specifies the global scaling factor of time for all bodies.
-     * A value of `0` freezes the simulation.
-     * A value of `0.1` gives a slow-motion effect.
-     * A value of `1.2` gives a speed-up effect.
-     *
-     * @property timing.timeScale
-     * @type number
-     * @default 1
-     */
-
-    /**
-     * A `Number` that specifies the current simulation-time in milliseconds starting from `0`. 
-     * It is incremented on every `Engine.update` by the `timing.delta`. 
-     *
-     * @property timing.timestamp
-     * @type number
-     * @default 0
-     */
-
-    /**
-     * A `Boolean` that specifies if the `Engine.run` game loop should use a fixed timestep (otherwise it is variable).
-     * If timing is fixed, then the apparant simulation speed will change depending on the frame rate (but behaviour will be deterministic).
-     * If the timing is variable, then the apparant simulation speed will be constant (approximately, but at the cost of determininism).
-     *
-     * @property timing.isFixed
-     * @type boolean
-     * @default false
-     */
-
-    /**
-     * A `Number` that specifies the time step between updates in milliseconds.
-     * If `engine.timing.isFixed` is set to `true`, then `delta` is fixed.
-     * If it is `false`, then `delta` can dynamically change to maintain the correct apparant simulation speed.
-     *
-     * @property timing.delta
-     * @type number
-     * @default 1000 / 60
-     */
-
-    /**
-     * A `Number` that specifies the time correction factor to apply to the current timestep.
-     * It is automatically handled when using `Engine.run`, but is also only optional even if you use your own game loop.
-     * The value is defined as `delta / lastDelta`, i.e. the percentage change of `delta` between steps.
-     * This value is always `1` (no correction) when frame rate is constant or `engine.timing.isFixed` is `true`.
-     * If the framerate and hence `delta` are changing, then correction should be applied to the current update to account for the change.
-     * See the paper on <a href="http://lonesock.net/article/verlet.html">Time Corrected Verlet</a> for more information.
-     *
-     * @property timing.correction
-     * @type number
-     * @default 1
-     */
-
-    /**
-     * An instance of a `Render` controller. The default value is a `Matter.Render` instance created by `Engine.create`.
-     * One may also develop a custom renderer module based on `Matter.Render` and pass an instance of it to `Engine.create` via `options.render`.
-     *
-     * A minimal custom renderer object must define at least three functions: `create`, `clear` and `world` (see `Matter.Render`).
-     * It is also possible to instead pass the _module_ reference via `options.render.controller` and `Engine.create` will instantiate one for you.
-     *
-     * @property render
-     * @type render
-     * @default a Matter.Render instance
-     */
-
-    /**
-     * An instance of a broadphase controller. The default value is a `Matter.Grid` instance created by `Engine.create`.
-     *
-     * @property broadphase
-     * @type grid
-     * @default a Matter.Grid instance
-     */
-
-    /**
-     * A `World` composite object that will contain all simulated bodies and constraints.
-     *
-     * @property world
-     * @type world
-     * @default a Matter.World instance
-     */
-
 })();
 
 ;   // End src/core/Engine.js
@@ -4563,7 +3406,7 @@ var Events = {};
 (function() {
 
     /**
-     * Subscribes a callback function to the given object's `eventName`.
+     * Subscribes a callback function to the given object's eventName
      * @method on
      * @param {} object
      * @param {string} eventNames
@@ -4584,7 +3427,7 @@ var Events = {};
     };
 
     /**
-     * Removes the given event callback. If no callback, clears all callbacks in `eventNames`. If no `eventNames`, clears all events.
+     * Removes the given event callback. If no callback, clears all callbacks in eventNames. If no eventNames, clears all events.
      * @method off
      * @param {} object
      * @param {string} eventNames
@@ -4620,7 +3463,7 @@ var Events = {};
     };
 
     /**
-     * Fires all the callbacks subscribed to the given object's `eventName`, in the order they subscribed, if any.
+     * Fires all the callbacks subscribed to the given object's eventName, in the order they subscribed, if any
      * @method trigger
      * @param {} object
      * @param {string} eventNames
@@ -4728,6 +3571,7 @@ var Metrics = {};
     Metrics.update = function(metrics, engine) {
         if (metrics.extended) {
             var world = engine.world,
+                broadphase = engine.broadphase[engine.broadphase.current],
                 bodies = Composite.allBodies(world);
 
             metrics.collisions = metrics.narrowDetections;
@@ -4737,14 +3581,12 @@ var Metrics = {};
             metrics.narrowEff = (metrics.narrowDetections / (metrics.narrowphaseTests || 1)).toFixed(2);
             metrics.broadEff = (1 - (metrics.broadphaseTests / (bodies.length || 1))).toFixed(2);
             metrics.narrowReuse = (metrics.narrowReuseCount / (metrics.narrowphaseTests || 1)).toFixed(2);
-            //var broadphase = engine.broadphase[engine.broadphase.current];
             //if (broadphase.instance)
             //    metrics.buckets = Common.keys(broadphase.instance.buckets).length;
         }
     };
 
 })();
-
 
 ;   // End src/core/Metrics.js
 
@@ -4757,43 +3599,36 @@ var Metrics = {};
 * @class Mouse
 */
 
-var Mouse = {};
+var Mouse;
 
 (function() {
-
+    
     /**
      * Description
-     * @method create
      * @param {HTMLElement} element
-     * @return {mouse} A new mouse
      */
-    Mouse.create = function(element) {
-        var mouse = {};
-
-        if (!element) {
-            Common.log('Mouse.create: element was undefined, defaulting to document.body', 'warn');
-        }
+    Mouse = function(element) {
+        var mouse = this;
         
-        mouse.element = element || document.body;
-        mouse.absolute = { x: 0, y: 0 };
-        mouse.position = { x: 0, y: 0 };
-        mouse.mousedownPosition = { x: 0, y: 0 };
-        mouse.mouseupPosition = { x: 0, y: 0 };
-        mouse.offset = { x: 0, y: 0 };
-        mouse.scale = { x: 1, y: 1 };
-        mouse.wheelDelta = 0;
-        mouse.button = -1;
-        mouse.pixelRatio = mouse.element.getAttribute('data-pixel-ratio') || 1;
+        this.element = element || document.body;
+        this.absolute = { x: 0, y: 0 };
+        this.position = { x: 0, y: 0 };
+        this.mousedownPosition = { x: 0, y: 0 };
+        this.mouseupPosition = { x: 0, y: 0 };
+        this.offset = { x: 0, y: 0 };
+        this.scale = { x: 1, y: 1 };
+        this.wheelDelta = 0;
+        this.button = -1;
 
-        mouse.sourceEvents = {
+        this.sourceEvents = {
             mousemove: null,
             mousedown: null,
             mouseup: null,
             mousewheel: null
         };
         
-        mouse.mousemove = function(event) { 
-            var position = _getRelativeMousePosition(event, mouse.element, mouse.pixelRatio),
+        this.mousemove = function(event) { 
+            var position = _getRelativeMousePosition(event, mouse.element),
                 touches = event.changedTouches;
 
             if (touches) {
@@ -4808,8 +3643,8 @@ var Mouse = {};
             mouse.sourceEvents.mousemove = event;
         };
         
-        mouse.mousedown = function(event) {
-            var position = _getRelativeMousePosition(event, mouse.element, mouse.pixelRatio),
+        this.mousedown = function(event) {
+            var position = _getRelativeMousePosition(event, mouse.element),
                 touches = event.changedTouches;
 
             if (touches) {
@@ -4828,8 +3663,8 @@ var Mouse = {};
             mouse.sourceEvents.mousedown = event;
         };
         
-        mouse.mouseup = function(event) {
-            var position = _getRelativeMousePosition(event, mouse.element, mouse.pixelRatio),
+        this.mouseup = function(event) {
+            var position = _getRelativeMousePosition(event, mouse.element),
                 touches = event.changedTouches;
 
             if (touches) {
@@ -4846,14 +3681,22 @@ var Mouse = {};
             mouse.sourceEvents.mouseup = event;
         };
 
-        mouse.mousewheel = function(event) {
+        this.mousewheel = function(event) {
             mouse.wheelDelta = Math.max(-1, Math.min(1, event.wheelDelta || -event.detail));
             event.preventDefault();
         };
 
         Mouse.setElement(mouse, mouse.element);
+    };
 
-        return mouse;
+    /**
+     * Description
+     * @method create
+     * @param {HTMLElement} element
+     * @return {mouse} A new mouse
+     */
+    Mouse.create = function(element) {
+        return new Mouse(element);
     };
 
     /**
@@ -4920,10 +3763,9 @@ var Mouse = {};
      * @private
      * @param {} event
      * @param {} element
-     * @param {number} pixelRatio
-     * @return {}
+     * @return ObjectExpression
      */
-    var _getRelativeMousePosition = function(event, element, pixelRatio) {
+    var _getRelativeMousePosition = function(event, element) {
         var elementBounds = element.getBoundingClientRect(),
             rootNode = (document.documentElement || document.body.parentNode || document.body),
             scrollX = (window.pageXOffset !== undefined) ? window.pageXOffset : rootNode.scrollLeft,
@@ -4938,150 +3780,16 @@ var Mouse = {};
             x = event.pageX - elementBounds.left - scrollX;
             y = event.pageY - elementBounds.top - scrollY;
         }
-
+        
         return { 
-            x: x / (element.clientWidth / element.width * pixelRatio),
-            y: y / (element.clientHeight / element.height * pixelRatio)
+            x: x / (element.clientWidth / element.width), 
+            y: y / (element.clientHeight / element.height)
         };
     };
 
 })();
 
-
 ;   // End src/core/Mouse.js
-
-
-// Begin src/core/Runner.js
-
-/**
-* The `Matter.Runner` module is an optional utility which provides a game loop, 
-* that handles updating and rendering a `Matter.Engine` for you within a browser.
-* Note that the method `Engine.run` is an alias for `Runner.run`.
-*
-* See [Demo.js](https://github.com/liabru/matter-js/blob/master/demo/js/Demo.js) 
-* and [DemoMobile.js](https://github.com/liabru/matter-js/blob/master/demo/js/DemoMobile.js) for usage examples.
-*
-* @class Runner
-*/
-
-var Runner = {};
-
-(function() {
-
-    var _fps = 60,
-        _deltaSampleSize = _fps,
-        _delta = 1000 / _fps;
-
-    var _requestAnimationFrame = window.requestAnimationFrame || window.webkitRequestAnimationFrame
-                                      || window.mozRequestAnimationFrame || window.msRequestAnimationFrame 
-                                      || function(callback){ window.setTimeout(function() { callback(Common.now()); }, _delta); };
-   
-    var _cancelAnimationFrame = window.cancelAnimationFrame || window.mozCancelAnimationFrame 
-                                      || window.webkitCancelAnimationFrame || window.msCancelAnimationFrame;
-
-    /**
-     * Provides a basic game loop that handles updating the engine for you.
-     * Calls `Engine.update` and `Engine.render` on the `requestAnimationFrame` event automatically.
-     * Handles time correction and non-fixed dynamic timing (if enabled). 
-     * Triggers `beforeTick`, `tick` and `afterTick` events.
-     * @method run
-     * @param {engine} engine
-     */
-    Runner.run = function(engine) {
-        var counterTimestamp = 0,
-            frameCounter = 0,
-            deltaHistory = [],
-            timePrev,
-            timeScalePrev = 1;
-
-        (function render(time){
-            var timing = engine.timing,
-                delta,
-                correction = 1;
-
-            timing.frameRequestId = _requestAnimationFrame(render);
-
-            if (!engine.enabled)
-                return;
-
-            // create an event object
-            var event = {
-                timestamp: time
-            };
-
-            Events.trigger(engine, 'beforeTick', event);
-
-            if (timing.isFixed) {
-                // fixed timestep
-                delta = timing.delta;
-            } else {
-                // dynamic timestep based on wall clock between calls
-                delta = (time - timePrev) || timing.delta;
-                timePrev = time;
-
-                // optimistically filter delta over a few frames, to improve stability
-                deltaHistory.push(delta);
-                deltaHistory = deltaHistory.slice(-_deltaSampleSize);
-                delta = Math.min.apply(null, deltaHistory);
-                
-                // limit delta
-                delta = delta < timing.deltaMin ? timing.deltaMin : delta;
-                delta = delta > timing.deltaMax ? timing.deltaMax : delta;
-
-                // time correction for delta
-                correction = delta / timing.delta;
-
-                // update engine timing object
-                timing.delta = delta;
-            }
-
-            // time correction for time scaling
-            if (timeScalePrev !== 0)
-                correction *= timing.timeScale / timeScalePrev;
-
-            if (timing.timeScale === 0)
-                correction = 0;
-
-            timeScalePrev = timing.timeScale;
-            
-            // fps counter
-            frameCounter += 1;
-            if (time - counterTimestamp >= 1000) {
-                timing.fps = frameCounter * ((time - counterTimestamp) / 1000);
-                counterTimestamp = time;
-                frameCounter = 0;
-            }
-
-            Events.trigger(engine, 'tick', event);
-
-            // if world has been modified, clear the render scene graph
-            if (engine.world.isModified && engine.render.controller.clear)
-                engine.render.controller.clear(engine.render);
-
-            // update
-            Engine.update(engine, delta, correction);
-
-            // render
-            Engine.render(engine);
-
-            Events.trigger(engine, 'afterTick', event);
-        })();
-    };
-
-    /**
-     * Ends execution of `Runner.run` on the given `engine`, by canceling the animation frame request event loop.
-     * If you wish to only temporarily pause the engine, see `engine.enabled` instead.
-     * @method stop
-     * @param {engine} engine
-     */
-    Runner.stop = function(engine) {
-        _cancelAnimationFrame(engine.timing.frameRequestId);
-    };
-
-})();
-
-
-;   // End src/core/Runner.js
 
 
 // Begin src/core/Sleeping.js
@@ -5096,19 +3804,16 @@ var Sleeping = {};
 
 (function() {
 
-    Sleeping._motionWakeThreshold = 0.18;
-    Sleeping._motionSleepThreshold = 0.08;
-    Sleeping._minBias = 0.9;
+    var _motionWakeThreshold = 0.18,
+        _motionSleepThreshold = 0.08,
+        _minBias = 0.9;
 
     /**
-     * Puts bodies to sleep or wakes them up depending on their motion.
+     * Description
      * @method update
      * @param {body[]} bodies
-     * @param {number} timeScale
      */
-    Sleeping.update = function(bodies, timeScale) {
-        var timeFactor = timeScale * timeScale * timeScale;
-
+    Sleeping.update = function(bodies) {
         // update bodies sleeping status
         for (var i = 0; i < bodies.length; i++) {
             var body = bodies[i],
@@ -5124,9 +3829,9 @@ var Sleeping = {};
                 maxMotion = Math.max(body.motion, motion);
         
             // biased average motion estimation between frames
-            body.motion = Sleeping._minBias * minMotion + (1 - Sleeping._minBias) * maxMotion;
+            body.motion = _minBias * minMotion + (1 - _minBias) * maxMotion;
             
-            if (body.sleepThreshold > 0 && body.motion < Sleeping._motionSleepThreshold * timeFactor) {
+            if (body.sleepThreshold > 0 && body.motion < _motionSleepThreshold) {
                 body.sleepCounter += 1;
                 
                 if (body.sleepCounter >= body.sleepThreshold)
@@ -5138,14 +3843,11 @@ var Sleeping = {};
     };
 
     /**
-     * Given a set of colliding pairs, wakes the sleeping bodies involved.
+     * Description
      * @method afterCollisions
      * @param {pair[]} pairs
-     * @param {number} timeScale
      */
-    Sleeping.afterCollisions = function(pairs, timeScale) {
-        var timeFactor = timeScale * timeScale * timeScale;
-
+    Sleeping.afterCollisions = function(pairs) {
         // wake up bodies involved in collisions
         for (var i = 0; i < pairs.length; i++) {
             var pair = pairs[i];
@@ -5166,7 +3868,7 @@ var Sleeping = {};
                 var sleepingBody = (bodyA.isSleeping && !bodyA.isStatic) ? bodyA : bodyB,
                     movingBody = sleepingBody === bodyA ? bodyB : bodyA;
 
-                if (!sleepingBody.isStatic && movingBody.motion > Sleeping._motionWakeThreshold * timeFactor) {
+                if (!sleepingBody.isStatic && movingBody.motion > _motionWakeThreshold) {
                     Sleeping.set(sleepingBody, false);
                 }
             }
@@ -5208,9 +3910,6 @@ var Sleeping = {};
 // Begin src/factory/Bodies.js
 
 /**
-* The `Matter.Bodies` module contains factory methods for creating rigid body models 
-* with commonly used body configurations (such as rectangles, circles and other polygons).
-*
 * See [Demo.js](https://github.com/liabru/matter-js/blob/master/demo/js/Demo.js) 
 * and [DemoMobile.js](https://github.com/liabru/matter-js/blob/master/demo/js/DemoMobile.js) for usage examples.
 *
@@ -5224,15 +3923,13 @@ var Bodies = {};
 (function() {
 
     /**
-     * Creates a new rigid body model with a rectangle hull. 
-     * The options parameter is an object that specifies any properties you wish to override the defaults.
-     * See the properties section of the `Matter.Body` module for detailed information on what you can pass via the `options` object.
+     * Description
      * @method rectangle
      * @param {number} x
      * @param {number} y
      * @param {number} width
      * @param {number} height
-     * @param {object} [options]
+     * @param {object} options
      * @return {body} A new rectangle body
      */
     Bodies.rectangle = function(x, y, width, height, options) {
@@ -5255,16 +3952,14 @@ var Bodies = {};
     };
     
     /**
-     * Creates a new rigid body model with a trapezoid hull. 
-     * The options parameter is an object that specifies any properties you wish to override the defaults.
-     * See the properties section of the `Matter.Body` module for detailed information on what you can pass via the `options` object.
+     * Description
      * @method trapezoid
      * @param {number} x
      * @param {number} y
      * @param {number} width
      * @param {number} height
      * @param {number} slope
-     * @param {object} [options]
+     * @param {object} options
      * @return {body} A new trapezoid body
      */
     Bodies.trapezoid = function(x, y, width, height, slope, options) {
@@ -5294,14 +3989,12 @@ var Bodies = {};
     };
 
     /**
-     * Creates a new rigid body model with a circle hull. 
-     * The options parameter is an object that specifies any properties you wish to override the defaults.
-     * See the properties section of the `Matter.Body` module for detailed information on what you can pass via the `options` object.
+     * Description
      * @method circle
      * @param {number} x
      * @param {number} y
      * @param {number} radius
-     * @param {object} [options]
+     * @param {object} options
      * @param {number} maxSides
      * @return {body} A new circle body
      */
@@ -5325,15 +4018,13 @@ var Bodies = {};
     };
 
     /**
-     * Creates a new rigid body model with a regular polygon hull with the given number of sides. 
-     * The options parameter is an object that specifies any properties you wish to override the defaults.
-     * See the properties section of the `Matter.Body` module for detailed information on what you can pass via the `options` object.
+     * Description
      * @method polygon
      * @param {number} x
      * @param {number} y
      * @param {number} sides
      * @param {number} radius
-     * @param {object} [options]
+     * @param {object} options
      * @return {body} A new regular polygon body
      */
     Bodies.polygon = function(x, y, sides, radius, options) {
@@ -5371,7 +4062,6 @@ var Bodies = {};
     };
 
 })();
-
 
 ;   // End src/factory/Bodies.js
 
@@ -5606,7 +4296,7 @@ var Composites = {};
      * @return {composite} A new composite car body
      */
     Composites.car = function(xx, yy, width, height, wheelSize) {
-        var group = Body.nextGroup(true),
+        var groupId = Body.nextGroupId(),
             wheelBase = -20,
             wheelAOffset = -width * 0.5 + wheelBase,
             wheelBOffset = width * 0.5 - wheelBase,
@@ -5614,9 +4304,7 @@ var Composites = {};
     
         var car = Composite.create({ label: 'Car' }),
             body = Bodies.trapezoid(xx, yy, width, height, 0.3, { 
-                collisionFilter: {
-                    group: group
-                },
+                groupId: groupId, 
                 friction: 0.01,
                 chamfer: {
                     radius: 10
@@ -5624,18 +4312,14 @@ var Composites = {};
             });
     
         var wheelA = Bodies.circle(xx + wheelAOffset, yy + wheelYOffset, wheelSize, { 
-            collisionFilter: {
-                group: group
-            },
+            groupId: groupId, 
             restitution: 0.5, 
             friction: 0.9,
             density: 0.01
         });
                     
         var wheelB = Bodies.circle(xx + wheelBOffset, yy + wheelYOffset, wheelSize, { 
-            collisionFilter: {
-                group: group
-            },
+            groupId: groupId, 
             restitution: 0.5, 
             friction: 0.9,
             density: 0.01
@@ -5683,7 +4367,7 @@ var Composites = {};
         particleOptions = Common.extend({ inertia: Infinity }, particleOptions);
         constraintOptions = Common.extend({ stiffness: 0.4 }, constraintOptions);
 
-        var softBody = Composites.stack(xx, yy, columns, rows, columnGap, rowGap, function(x, y) {
+        var softBody = Composites.stack(xx, yy, columns, rows, columnGap, rowGap, function(x, y, column, row) {
             return Bodies.circle(x, y, particleRadius, particleOptions);
         });
 
@@ -5695,7 +4379,6 @@ var Composites = {};
     };
 
 })();
-
 
 ;   // End src/factory/Composites.js
 
@@ -5893,10 +4576,6 @@ var Bounds = {};
 // Begin src/geometry/Vector.js
 
 /**
-* The `Matter.Vector` module contains methods for creating and manipulating vectors.
-* Vectors are the basis of all the geometry related operations in the engine.
-* A `Matter.Vector` object is of the form `{ x: 0, y: 0 }`.
-*
 * See [Demo.js](https://github.com/liabru/matter-js/blob/master/demo/js/Demo.js) 
 * and [DemoMobile.js](https://github.com/liabru/matter-js/blob/master/demo/js/DemoMobile.js) for usage examples.
 *
@@ -5910,17 +4589,7 @@ var Vector = {};
 (function() {
 
     /**
-     * Returns a new vector with `x` and `y` copied from the given `vector`.
-     * @method clone
-     * @param {vector} vector
-     * @return {vector} A new cloned vector
-     */
-    Vector.clone = function(vector) {
-        return { x: vector.x, y: vector.y };
-    };
-
-    /**
-     * Returns the magnitude (length) of a vector.
+     * Description
      * @method magnitude
      * @param {vector} vector
      * @return {number} The magnitude of the vector
@@ -5930,7 +4599,7 @@ var Vector = {};
     };
 
     /**
-     * Returns the magnitude (length) of a vector (therefore saving a `sqrt` operation).
+     * Description
      * @method magnitudeSquared
      * @param {vector} vector
      * @return {number} The squared magnitude of the vector
@@ -5940,11 +4609,11 @@ var Vector = {};
     };
 
     /**
-     * Rotates the vector about (0, 0) by specified angle.
+     * Description
      * @method rotate
      * @param {vector} vector
      * @param {number} angle
-     * @return {vector} A new vector rotated about (0, 0)
+     * @return {vector} A new vector rotated
      */
     Vector.rotate = function(vector, angle) {
         var cos = Math.cos(angle), sin = Math.sin(angle);
@@ -5955,7 +4624,7 @@ var Vector = {};
     };
 
     /**
-     * Rotates the vector about a specified point by specified angle.
+     * Description
      * @method rotateAbout
      * @param {vector} vector
      * @param {number} angle
@@ -5971,7 +4640,7 @@ var Vector = {};
     };
 
     /**
-     * Normalises a vector (such that its magnitude is `1`).
+     * Description
      * @method normalise
      * @param {vector} vector
      * @return {vector} A new vector normalised
@@ -5984,7 +4653,7 @@ var Vector = {};
     };
 
     /**
-     * Returns the dot-product of two vectors.
+     * Description
      * @method dot
      * @param {vector} vectorA
      * @param {vector} vectorB
@@ -5995,7 +4664,7 @@ var Vector = {};
     };
 
     /**
-     * Returns the cross-product of two vectors.
+     * Description
      * @method cross
      * @param {vector} vectorA
      * @param {vector} vectorB
@@ -6006,29 +4675,29 @@ var Vector = {};
     };
 
     /**
-     * Adds the two vectors.
+     * Description
      * @method add
      * @param {vector} vectorA
      * @param {vector} vectorB
-     * @return {vector} A new vector of vectorA and vectorB added
+     * @return {vector} A new vector added
      */
     Vector.add = function(vectorA, vectorB) {
         return { x: vectorA.x + vectorB.x, y: vectorA.y + vectorB.y };
     };
 
     /**
-     * Subtracts the two vectors.
+     * Description
      * @method sub
      * @param {vector} vectorA
      * @param {vector} vectorB
-     * @return {vector} A new vector of vectorA and vectorB subtracted
+     * @return {vector} A new vector subtracted
      */
     Vector.sub = function(vectorA, vectorB) {
         return { x: vectorA.x - vectorB.x, y: vectorA.y - vectorB.y };
     };
 
     /**
-     * Multiplies a vector and a scalar.
+     * Description
      * @method mult
      * @param {vector} vector
      * @param {number} scalar
@@ -6039,7 +4708,7 @@ var Vector = {};
     };
 
     /**
-     * Divides a vector and a scalar.
+     * Description
      * @method div
      * @param {vector} vector
      * @param {number} scalar
@@ -6050,10 +4719,10 @@ var Vector = {};
     };
 
     /**
-     * Returns the perpendicular vector. Set `negate` to true for the perpendicular in the opposite direction.
+     * Description
      * @method perp
      * @param {vector} vector
-     * @param {bool} [negate=false]
+     * @param {bool} negate
      * @return {vector} The perpendicular vector
      */
     Vector.perp = function(vector, negate) {
@@ -6062,7 +4731,7 @@ var Vector = {};
     };
 
     /**
-     * Negates both components of a vector such that it points in the opposite direction.
+     * Description
      * @method neg
      * @param {vector} vector
      * @return {vector} The negated vector
@@ -6072,7 +4741,7 @@ var Vector = {};
     };
 
     /**
-     * Returns the angle in radians between the two vectors relative to the x-axis.
+     * Returns the angle in radians between the two vectors relative to the x-axis
      * @method angle
      * @param {vector} vectorA
      * @param {vector} vectorB
@@ -6090,10 +4759,6 @@ var Vector = {};
 // Begin src/geometry/Vertices.js
 
 /**
-* The `Matter.Vertices` module contains methods for creating and manipulating sets of vertices.
-* A set of vertices is an array of `Matter.Vector` with additional indexing properties inserted by `Vertices.create`.
-* A `Matter.Body` maintains a set of vertices to represent the shape of the object (its convex hull).
-*
 * See [Demo.js](https://github.com/liabru/matter-js/blob/master/demo/js/Demo.js) 
 * and [DemoMobile.js](https://github.com/liabru/matter-js/blob/master/demo/js/DemoMobile.js) for usage examples.
 *
@@ -6107,58 +4772,37 @@ var Vertices = {};
 (function() {
 
     /**
-     * Creates a new set of `Matter.Body` compatible vertices.
-     * The `points` argument accepts an array of `Matter.Vector` points orientated around the origin `(0, 0)`, for example:
-     *
-     *     [{ x: 0, y: 0 }, { x: 25, y: 50 }, { x: 50, y: 0 }]
-     *
-     * The `Vertices.create` method returns a new array of vertices, which are similar to Matter.Vector objects,
-     * but with some additional references required for efficient collision detection routines.
-     *
-     * Note that the `body` argument is not optional, a `Matter.Body` reference must be provided.
-     *
+     * Description
      * @method create
-     * @param {vector[]} points
+     * @param {vertices} vertices
      * @param {body} body
      */
-    Vertices.create = function(points, body) {
-        var vertices = [];
-
-        for (var i = 0; i < points.length; i++) {
-            var point = points[i],
-                vertex = {};
-
-            vertex.x = point.x;
-            vertex.y = point.y;
-            vertex.index = i;
-            vertex.body = body;
-
-            vertices.push(vertex);
+    Vertices.create = function(vertices, body) {
+        for (var i = 0; i < vertices.length; i++) {
+            vertices[i].index = i;
+            vertices[i].body = body;
         }
+    };
+
+    /**
+     * Description
+     * @method fromPath
+     * @param {string} path
+     * @return {vertices} vertices
+     */
+    Vertices.fromPath = function(path) {
+        var pathPattern = /L\s*([\-\d\.]*)\s*([\-\d\.]*)/ig,
+            vertices = [];
+
+        path.replace(pathPattern, function(match, x, y) {
+            vertices.push({ x: parseFloat(x, 10), y: parseFloat(y, 10) });
+        });
 
         return vertices;
     };
 
     /**
-     * Parses a _simple_ SVG-style path into a `Matter.Vertices` object for the given `Matter.Body`.
-     * @method fromPath
-     * @param {string} path
-     * @param {body} body
-     * @return {vertices} vertices
-     */
-    Vertices.fromPath = function(path, body) {
-        var pathPattern = /L\s*([\-\d\.]*)\s*([\-\d\.]*)/ig,
-            points = [];
-
-        path.replace(pathPattern, function(match, x, y) {
-            points.push({ x: parseFloat(x), y: parseFloat(y) });
-        });
-
-        return Vertices.create(points, body);
-    };
-
-    /**
-     * Returns the centre (centroid) of the set of vertices.
+     * Description
      * @method centre
      * @param {vertices} vertices
      * @return {vector} The centre point
@@ -6181,7 +4825,7 @@ var Vertices = {};
     };
 
     /**
-     * Returns the area of the set of vertices.
+     * Description
      * @method area
      * @param {vertices} vertices
      * @param {bool} signed
@@ -6203,11 +4847,11 @@ var Vertices = {};
     };
 
     /**
-     * Returns the moment of inertia (second moment of area) of the set of vertices given the total mass.
+     * Description
      * @method inertia
      * @param {vertices} vertices
      * @param {number} mass
-     * @return {number} The polygon's moment of inertia
+     * @return {number} The polygon's moment of inertia, using second moment of area
      */
     Vertices.inertia = function(vertices, mass) {
         var numerator = 0,
@@ -6229,7 +4873,7 @@ var Vertices = {};
     };
 
     /**
-     * Translates the set of vertices in-place.
+     * Description
      * @method translate
      * @param {vertices} vertices
      * @param {vector} vector
@@ -6247,13 +4891,11 @@ var Vertices = {};
                 vertices[i].x += vector.x;
                 vertices[i].y += vector.y;
             }
-        }
-
-        return vertices;
+        } 
     };
 
     /**
-     * Rotates the set of vertices in-place.
+     * Description
      * @method rotate
      * @param {vertices} vertices
      * @param {number} angle
@@ -6274,12 +4916,10 @@ var Vertices = {};
             vertice.x = point.x + (dx * cos - dy * sin);
             vertice.y = point.y + (dx * sin + dy * cos);
         }
-
-        return vertices;
     };
 
     /**
-     * Returns `true` if the `point` is inside the set of `vertices`.
+     * Description
      * @method contains
      * @param {vertices} vertices
      * @param {vector} point
@@ -6298,7 +4938,7 @@ var Vertices = {};
     };
 
     /**
-     * Scales the vertices from a point (default is centre) in-place.
+     * Scales the vertices from a point (default is centre)
      * @method scale
      * @param {vertices} vertices
      * @param {number} scaleX
@@ -6345,7 +4985,8 @@ var Vertices = {};
         qualityMin = qualityMin || 2;
         qualityMax = qualityMax || 14;
 
-        var newVertices = [];
+        var centre = Vertices.centre(vertices),
+            newVertices = [];
 
         for (var i = 0; i < vertices.length; i++) {
             var prevVertex = vertices[i - 1 >= 0 ? i - 1 : vertices.length - 1],
@@ -6399,34 +5040,29 @@ var Vertices = {};
 
 })();
 
-
 ;   // End src/geometry/Vertices.js
 
 
 // Begin src/render/Render.js
 
 /**
-* The `Matter.Render` module is the default `render.controller` used by a `Matter.Engine`.
-* This renderer is HTML5 canvas based and supports a number of drawing options including sprites and viewports.
-*
-* It is possible develop a custom renderer module based on `Matter.Render` and pass an instance of it to `Engine.create` via `options.render`.
-* A minimal custom renderer object must define at least three functions: `create`, `clear` and `world` (see `Matter.Render`).
-*
-* See also `Matter.RenderPixi` for an alternate WebGL, scene-graph based renderer.
+* See [Demo.js](https://github.com/liabru/matter-js/blob/master/demo/js/Demo.js) 
+* and [DemoMobile.js](https://github.com/liabru/matter-js/blob/master/demo/js/DemoMobile.js) for usage examples.
 *
 * @class Render
 */
+
+// TODO: viewports
+// TODO: two.js, pixi.js
 
 var Render = {};
 
 (function() {
     
     /**
-     * Creates a new renderer. The options parameter is an object that specifies any properties you wish to override the defaults.
-     * All properties have default values, and many are pre-calculated automatically based on other properties.
-     * See the properites section below for detailed information on what you can pass via the `options` object.
+     * Description
      * @method create
-     * @param {object} [options]
+     * @param {object} options
      * @return {render} A new renderer
      */
     Render.create = function(options) {
@@ -6437,7 +5073,6 @@ var Render = {};
             options: {
                 width: 800,
                 height: 600,
-                pixelRatio: 1,
                 background: '#fafafa',
                 wireframeBackground: '#222',
                 hasBounds: false,
@@ -6474,46 +5109,48 @@ var Render = {};
             }
         };
 
-        if (render.options.pixelRatio !== 1) {
-            Render.setPixelRatio(render, render.options.pixelRatio);
-        }
+        Render.setBackground(render, render.options.background);
 
         if (Common.isElement(render.element)) {
             render.element.appendChild(render.canvas);
         } else {
-            Common.log('Render.create: options.element was undefined, render.canvas was created but not appended', 'warn');
+            Common.log('No "render.element" passed, "render.canvas" was not inserted into document.', 'warn');
         }
 
         return render;
     };
 
     /**
-     * Sets the pixel ratio of the renderer and updates the canvas.
-     * To automatically detect the correct ratio, pass the string `'auto'` for `pixelRatio`.
-     * @method setPixelRatio
-     * @param {render} render
-     * @param {number} pixelRatio
+     * Clears the renderer. In this implementation, this is a noop.
+     * @method clear
+     * @param {RenderPixi} render
      */
-    Render.setPixelRatio = function(render, pixelRatio) {
-        var options = render.options,
-            canvas = render.canvas;
-
-        if (pixelRatio === 'auto') {
-            pixelRatio = _getPixelRatio(canvas);
-        }
-
-        options.pixelRatio = pixelRatio;
-        canvas.setAttribute('data-pixel-ratio', pixelRatio);
-        canvas.width = options.width * pixelRatio;
-        canvas.height = options.height * pixelRatio;
-        canvas.style.width = options.width + 'px';
-        canvas.style.height = options.height + 'px';
-        render.context.scale(pixelRatio, pixelRatio);
+    Render.clear = function(render) {
+        // nothing required to clear this renderer implentation
+        // if a scene graph is required, clear it here (see RenderPixi.js)
     };
 
     /**
-     * Renders the given `engine`'s `Matter.World` object.
-     * This is the entry point for all rendering and should be called every time the scene changes.
+     * Sets the background CSS property of the canvas 
+     * @method setBackground
+     * @param {render} render
+     * @param {string} background
+     */
+    Render.setBackground = function(render, background) {
+        if (render.currentBackground !== background) {
+            var cssBackground = background;
+
+            if (/(jpg|gif|png)$/.test(background))
+                cssBackground = 'url(' + background + ')';
+
+            render.canvas.style.background = cssBackground;
+            render.canvas.style.backgroundSize = "contain";
+            render.currentBackground = background;
+        }
+    };
+
+    /**
+     * Description
      * @method world
      * @param {engine} engine
      */
@@ -6525,14 +5162,15 @@ var Render = {};
             options = render.options,
             allBodies = Composite.allBodies(world),
             allConstraints = Composite.allConstraints(world),
-            background = options.wireframes ? options.wireframeBackground : options.background,
             bodies = [],
             constraints = [],
             i;
 
-        // apply background if it has changed
-        if (render.currentBackground !== background)
-            _applyBackground(render, background);
+        if (options.wireframes) {
+            Render.setBackground(render, options.wireframeBackground);
+        } else {
+            Render.setBackground(render, options.background);
+        }
 
         // clear the canvas with a transparent fill, to allow the canvas background to show
         context.globalCompositeOperation = 'source-in';
@@ -6541,12 +5179,12 @@ var Render = {};
         context.globalCompositeOperation = 'source-over';
 
         // handle bounds
-        if (options.hasBounds) {
-            var boundsWidth = render.bounds.max.x - render.bounds.min.x,
-                boundsHeight = render.bounds.max.y - render.bounds.min.y,
-                boundsScaleX = boundsWidth / options.width,
-                boundsScaleY = boundsHeight / options.height;
+        var boundsWidth = render.bounds.max.x - render.bounds.min.x,
+            boundsHeight = render.bounds.max.y - render.bounds.min.y,
+            boundsScaleX = boundsWidth / render.options.width,
+            boundsScaleY = boundsHeight / render.options.height;
 
+        if (options.hasBounds) {
             // filter out bodies that are not in view
             for (i = 0; i < allBodies.length; i++) {
                 var body = allBodies[i];
@@ -6608,21 +5246,20 @@ var Render = {};
 
         Render.constraints(constraints, context);
 
-        if (options.showBroadphase && engine.broadphase.controller === Grid)
-            Render.grid(engine, engine.broadphase, context);
+        if (options.showBroadphase && engine.broadphase.current === 'grid')
+            Render.grid(engine, engine.broadphase[engine.broadphase.current].instance, context);
 
         if (options.showDebug)
             Render.debug(engine, context);
 
         if (options.hasBounds) {
             // revert view transforms
-            context.setTransform(options.pixelRatio, 0, 0, options.pixelRatio, 0, 0);
+            context.setTransform(1, 0, 0, 1, 0, 0);
         }
     };
 
     /**
      * Description
-     * @private
      * @method debug
      * @param {engine} engine
      * @param {RenderingContext} context
@@ -6679,7 +5316,6 @@ var Render = {};
 
     /**
      * Description
-     * @private
      * @method constraints
      * @param {constraint[]} constraints
      * @param {RenderingContext} context
@@ -6718,7 +5354,6 @@ var Render = {};
     
     /**
      * Description
-     * @private
      * @method bodyShadows
      * @param {engine} engine
      * @param {body[]} bodies
@@ -6726,7 +5361,8 @@ var Render = {};
      */
     Render.bodyShadows = function(engine, bodies, context) {
         var c = context,
-            render = engine.render;
+            render = engine.render,
+            options = render.options;
 
         for (var i = 0; i < bodies.length; i++) {
             var body = bodies[i];
@@ -6767,7 +5403,6 @@ var Render = {};
 
     /**
      * Description
-     * @private
      * @method bodies
      * @param {engine} engine
      * @param {body[]} bodies
@@ -6844,7 +5479,6 @@ var Render = {};
 
     /**
      * Optimised method for drawing body wireframes in one pass
-     * @private
      * @method bodyWireframes
      * @param {engine} engine
      * @param {body[]} bodies
@@ -6879,7 +5513,6 @@ var Render = {};
 
     /**
      * Draws body bounds
-     * @private
      * @method bodyBounds
      * @param {engine} engine
      * @param {body[]} bodies
@@ -6911,7 +5544,6 @@ var Render = {};
 
     /**
      * Draws body angle indicators and axes
-     * @private
      * @method bodyAxes
      * @param {engine} engine
      * @param {body[]} bodies
@@ -6959,7 +5591,6 @@ var Render = {};
 
     /**
      * Draws body positions
-     * @private
      * @method bodyPositions
      * @param {engine} engine
      * @param {body[]} bodies
@@ -7007,14 +5638,15 @@ var Render = {};
 
     /**
      * Draws body velocity
-     * @private
      * @method bodyVelocity
      * @param {engine} engine
      * @param {body[]} bodies
      * @param {RenderingContext} context
      */
     Render.bodyVelocity = function(engine, bodies, context) {
-        var c = context;
+        var c = context,
+            render = engine.render,
+            options = render.options;
 
         c.beginPath();
 
@@ -7035,7 +5667,6 @@ var Render = {};
 
     /**
      * Draws body ids
-     * @private
      * @method bodyIds
      * @param {engine} engine
      * @param {body[]} bodies
@@ -7058,7 +5689,6 @@ var Render = {};
 
     /**
      * Description
-     * @private
      * @method collisions
      * @param {engine} engine
      * @param {pair[]} pairs
@@ -7125,7 +5755,6 @@ var Render = {};
 
     /**
      * Description
-     * @private
      * @method grid
      * @param {engine} engine
      * @param {grid} grid
@@ -7164,14 +5793,15 @@ var Render = {};
 
     /**
      * Description
-     * @private
      * @method inspector
      * @param {inspector} inspector
      * @param {RenderingContext} context
      */
     Render.inspector = function(inspector, context) {
         var engine = inspector.engine,
+            mouse = engine.input.mouse,
             selected = inspector.selected,
+            c = context,
             render = engine.render,
             options = render.options,
             bounds;
@@ -7265,23 +5895,6 @@ var Render = {};
     };
 
     /**
-     * Gets the pixel ratio of the canvas.
-     * @method _getPixelRatio
-     * @private
-     * @param {HTMLElement} canvas
-     * @return {Number} pixel ratio
-     */
-    var _getPixelRatio = function(canvas) {
-        var context = canvas.getContext('2d'),
-            devicePixelRatio = window.devicePixelRatio || 1,
-            backingStorePixelRatio = context.webkitBackingStorePixelRatio || context.mozBackingStorePixelRatio
-                                      || context.msBackingStorePixelRatio || context.oBackingStorePixelRatio
-                                      || context.backingStorePixelRatio || 1;
-
-        return devicePixelRatio / backingStorePixelRatio;
-    };
-
-    /**
      * Gets the requested texture (an Image) via its path
      * @method _getTexture
      * @private
@@ -7301,110 +5914,7 @@ var Render = {};
         return image;
     };
 
-    /**
-     * Applies the background to the canvas using CSS.
-     * @method applyBackground
-     * @private
-     * @param {render} render
-     * @param {string} background
-     */
-    var _applyBackground = function(render, background) {
-        var cssBackground = background;
-
-        if (/(jpg|gif|png)$/.test(background))
-            cssBackground = 'url(' + background + ')';
-
-        render.canvas.style.background = cssBackground;
-        render.canvas.style.backgroundSize = "contain";
-        render.currentBackground = background;
-    };
-
-    /*
-    *
-    *  Properties Documentation
-    *
-    */
-
-    /**
-     * A back-reference to the `Matter.Render` module.
-     *
-     * @property controller
-     * @type render
-     */
-
-    /**
-     * A reference to the element where the canvas is to be inserted (if `render.canvas` has not been specified)
-     *
-     * @property element
-     * @type HTMLElement
-     * @default null
-     */
-
-    /**
-     * The canvas element to render to. If not specified, one will be created if `render.element` has been specified.
-     *
-     * @property canvas
-     * @type HTMLCanvasElement
-     * @default null
-     */
-
-    /**
-     * The configuration options of the renderer.
-     *
-     * @property options
-     * @type {}
-     */
-
-    /**
-     * The target width in pixels of the `render.canvas` to be created.
-     *
-     * @property options.width
-     * @type number
-     * @default 800
-     */
-
-    /**
-     * The target height in pixels of the `render.canvas` to be created.
-     *
-     * @property options.height
-     * @type number
-     * @default 600
-     */
-
-    /**
-     * A flag that specifies if `render.bounds` should be used when rendering.
-     *
-     * @property options.hasBounds
-     * @type boolean
-     * @default false
-     */
-
-    /**
-     * A `Bounds` object that specifies the drawing view region. 
-     * Rendering will be automatically transformed and scaled to fit within the canvas size (`render.options.width` and `render.options.height`).
-     * This allows for creating views that can pan or zoom around the scene.
-     * You must also set `render.options.hasBounds` to `true` to enable bounded rendering.
-     *
-     * @property bounds
-     * @type bounds
-     */
-
-    /**
-     * The 2d rendering context from the `render.canvas` element.
-     *
-     * @property context
-     * @type CanvasRenderingContext2D
-     */
-
-    /**
-     * The sprite texture cache.
-     *
-     * @property textures
-     * @type {}
-     */
-
 })();
-
 
 ;   // End src/render/Render.js
 
@@ -7438,7 +5948,6 @@ var RenderPixi = {};
                 height: 600,
                 background: '#fafafa',
                 wireframeBackground: '#222',
-                hasBounds: false,
                 enabled: true,
                 wireframes: true,
                 showSleeping: true,
@@ -7455,25 +5964,12 @@ var RenderPixi = {};
             }
         };
 
-        var render = Common.extend(defaults, options),
-            transparent = !render.options.wireframes && render.options.background === 'transparent';
+        var render = Common.extend(defaults, options);
 
         // init pixi
-        render.context = new PIXI.WebGLRenderer(render.options.width, render.options.height, render.canvas, transparent, true);
+        render.context = new PIXI.WebGLRenderer(800, 600, render.canvas, false, true);
         render.canvas = render.context.view;
-        render.container = new PIXI.DisplayObjectContainer();
         render.stage = new PIXI.Stage();
-        render.stage.addChild(render.container);
-        render.bounds = render.bounds || { 
-            min: { 
-                x: 0,
-                y: 0
-            }, 
-            max: { 
-                x: render.options.width,
-                y: render.options.height
-            }
-        };
 
         // caches
         render.textures = {};
@@ -7482,7 +5978,7 @@ var RenderPixi = {};
 
         // use a sprite batch for performance
         render.spriteBatch = new PIXI.SpriteBatch();
-        render.container.addChild(render.spriteBatch);
+        render.stage.addChild(render.spriteBatch);
 
         // insert canvas
         if (Common.isElement(render.element)) {
@@ -7504,12 +6000,12 @@ var RenderPixi = {};
      * @param {RenderPixi} render
      */
     RenderPixi.clear = function(render) {
-        var container = render.container,
+        var stage = render.stage,
             spriteBatch = render.spriteBatch;
 
-        // clear stage container
-        while (container.children[0]) { 
-            container.removeChild(container.children[0]); 
+        // clear stage
+        while (stage.children[0]) { 
+            stage.removeChild(stage.children[0]); 
         }
 
         // clear sprite batch
@@ -7529,15 +6025,11 @@ var RenderPixi = {};
         if (bgSprite)
             spriteBatch.addChildAt(bgSprite, 0);
 
-        // add sprite batch back into container
-        render.container.addChild(render.spriteBatch);
+        // add sprite batch back into stage
+        render.stage.addChild(render.spriteBatch);
 
         // reset background state
         render.currentBackground = null;
-
-        // reset bounds transforms
-        container.scale.set(1, 1);
-        container.position.set(0, 0);
     };
 
     /**
@@ -7585,55 +6077,15 @@ var RenderPixi = {};
             world = engine.world,
             context = render.context,
             stage = render.stage,
-            container = render.container,
             options = render.options,
             bodies = Composite.allBodies(world),
-            allConstraints = Composite.allConstraints(world),
-            constraints = [],
+            constraints = Composite.allConstraints(world),
             i;
 
         if (options.wireframes) {
             RenderPixi.setBackground(render, options.wireframeBackground);
         } else {
             RenderPixi.setBackground(render, options.background);
-        }
-
-        // handle bounds
-        var boundsWidth = render.bounds.max.x - render.bounds.min.x,
-            boundsHeight = render.bounds.max.y - render.bounds.min.y,
-            boundsScaleX = boundsWidth / render.options.width,
-            boundsScaleY = boundsHeight / render.options.height;
-
-        if (options.hasBounds) {
-            // Hide bodies that are not in view
-            for (i = 0; i < bodies.length; i++) {
-                var body = bodies[i];
-                body.render.sprite.visible = Bounds.overlaps(body.bounds, render.bounds);
-            }
-
-            // filter out constraints that are not in view
-            for (i = 0; i < allConstraints.length; i++) {
-                var constraint = allConstraints[i],
-                    bodyA = constraint.bodyA,
-                    bodyB = constraint.bodyB,
-                    pointAWorld = constraint.pointA,
-                    pointBWorld = constraint.pointB;
-
-                if (bodyA) pointAWorld = Vector.add(bodyA.position, constraint.pointA);
-                if (bodyB) pointBWorld = Vector.add(bodyB.position, constraint.pointB);
-
-                if (!pointAWorld || !pointBWorld)
-                    continue;
-
-                if (Bounds.contains(render.bounds, pointAWorld) || Bounds.contains(render.bounds, pointBWorld))
-                    constraints.push(constraint);
-            }
-
-            // transform the view
-            container.scale.set(1 / boundsScaleX, 1 / boundsScaleY);
-            container.position.set(-render.bounds.min.x * (1 / boundsScaleX), -render.bounds.min.y * (1 / boundsScaleY));
-        } else {
-            constraints = allConstraints;
         }
 
         for (i = 0; i < bodies.length; i++)
@@ -7658,7 +6110,7 @@ var RenderPixi = {};
             bodyB = constraint.bodyB,
             pointA = constraint.pointA,
             pointB = constraint.pointB,
-            container = render.container,
+            stage = render.stage,
             constraintRender = constraint.render,
             primitiveId = 'c-' + constraint.id,
             primitive = render.primitives[primitiveId];
@@ -7674,8 +6126,8 @@ var RenderPixi = {};
         }
 
         // add to scene graph if not already there
-        if (Common.indexOf(container.children, primitive) === -1)
-            container.addChild(primitive);
+        if (stage.children.indexOf(primitive) === -1)
+            stage.addChild(primitive);
 
         // render the constraint on every update, since they can change dynamically
         primitive.clear();
@@ -7720,19 +6172,17 @@ var RenderPixi = {};
                 sprite = render.sprites[spriteId] = _createBodySprite(render, body);
 
             // add to scene graph if not already there
-            if (Common.indexOf(spriteBatch.children, sprite) === -1)
+            if (spriteBatch.children.indexOf(sprite) === -1)
                 spriteBatch.addChild(sprite);
 
             // update body sprite
             sprite.position.x = body.position.x;
             sprite.position.y = body.position.y;
             sprite.rotation = body.angle;
-            sprite.scale.x = bodyRender.sprite.xScale || 1;
-            sprite.scale.y = bodyRender.sprite.yScale || 1;
         } else {
             var primitiveId = 'b-' + body.id,
                 primitive = render.primitives[primitiveId],
-                container = render.container;
+                stage = render.stage;
 
             // initialise body primitive if not existing
             if (!primitive) {
@@ -7741,8 +6191,8 @@ var RenderPixi = {};
             }
 
             // add to scene graph if not already there
-            if (Common.indexOf(container.children, primitive) === -1)
-                container.addChild(primitive);
+            if (stage.children.indexOf(primitive) === -1)
+                stage.addChild(primitive);
 
             // update body primitive
             primitive.position.x = body.position.x;
@@ -7843,7 +6293,6 @@ var RenderPixi = {};
 
 })();
 
-
 ;   // End src/render/RenderPixi.js
 
 
@@ -7855,8 +6304,6 @@ World.addComposite = Composite.addComposite;
 World.addBody = Composite.addBody;
 World.addConstraint = Composite.addConstraint;
 World.clear = Composite.clear;
-
-Engine.run = Runner.run;
 
 // exports
 
@@ -7887,7 +6334,6 @@ Matter.Render = Render;
 Matter.RenderPixi = RenderPixi;
 Matter.Events = Events;
 Matter.Query = Query;
-Matter.Runner = Runner;
 
 // CommonJS module
 if (typeof exports !== 'undefined') {
