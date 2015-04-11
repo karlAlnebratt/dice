@@ -62,6 +62,7 @@ Events.on(engine, 'tick', function (event) {
 
     var isHit = Query.region(terrainBodies, ship.bounds);
     var posY = ship.position.y;
+
     if(!!isHit.length || posY >= 580 || posY <= 20) {
         ship.render.sprite.texture = '/images/explosion.png';
         ship.isStatic = true;
@@ -74,6 +75,8 @@ Events.on(engine, 'tick', function (event) {
 var ship = Bodies.rectangle(400, 320, 40, 40, {
     id: "ship",
     frictionAir: 0.1,
+    mass: 0,
+    torque: 0,
     render: {
         sprite: {
             texture: '/images/ship.png'
@@ -165,3 +168,40 @@ function moveShipUp (direction) {
         x: 0, y: -0.1
     });
 }
+
+var shipCategory = 0x0001;
+
+function shootMissile() {
+    var randomPos = randomIntFromInterval(0, 800);
+
+    var missile = Bodies.rectangle(
+        randomPos,
+        600,
+        25,
+        50,
+        {
+            mass: 10,
+            friction: 0,
+            collisionFilter: {
+                mask: null
+            },
+            render: { fillStyle: 'green', strokeStyle: 'green' }
+        }
+    );
+
+    Body.applyForce(missile, {
+        x: randomPos,
+        y: 600
+    }, {
+        x: 0,
+        y: -0.9
+    });
+
+    World.add(engine.world, [missile]);
+
+}
+shootMissile();
+
+setInterval(function() {
+    shootMissile();
+}, 2000);
