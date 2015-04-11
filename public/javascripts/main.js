@@ -30,69 +30,43 @@ var terrainBodies = [],
         width: 40,
         height: null,
         y: 600
-    },
-    buildingHeightRange = {
-        from: 50,
-        to: 400
-    };
+    }
 
-var compositeBuildings = Composite.create();
-
-// add some terrain
-addTerrain(20, true);
-addTerrain(20, false);
-
-// Get width of composite by last body position and width
-var buildingComposites = Composite.allComposites(compositeBuildings);
-var buildingComposite = buildingComposites[0];
-var buildingBodies = Composite.allBodies(buildingComposite);
-var lastBuildingBody = buildingBodies[buildingBodies.length - 1];
-var buildingCompositeMinX = lastBuildingBody.bounds.min.x;
-
+var compositeTerrain = Composite.create();
 
 // apply force to terrain bodies
 Events.on(engine, 'tick', function (event) {
-    //Body.applyForce(terrainBodies[0], {x: 0, y: 0}, {x: -100, y: 0});
 
-    // for(var i = 0; i < terrainBodies.length; i++) {
-    //     Body.translate(terrainBodies[i], { x: -5, y: 0 });
-    // }
+    Composite.translate(compositeTerrain, { x: -2, y: 0 });
 
-    //Body.translate(composite.allBodies(), { x: -5, y: 0});
+    var terrainBodies = Composite.allBodies(compositeTerrain);
 
-    var buildingComposites = Composite.allComposites(compositeBuildings);
+    if(terrainBodies) {
+        // Check if last is fully in viewport
+        var terrainBody = null;
+        if(terrainBodies.length > 0) {
+            terrainBody = terrainBodies[terrainBodies.length - 1];
+        } else {
+            terrainBody = terrainBodies;
+        }
 
-    for(var i = 0; i < buildingComposites.length; i++) {
-        // Get composite
-        var buildingComposite = buildingComposites[i];
-
-        // Set position
-        Composite.translate(buildingComposite, { x: -2, y: 0 });
-
-        // Get corresponding bodies in composite
-        var buildingBodies = Composite.allBodies(buildingComposite);
-
-        // Get last body in composite
-        var lastBuildingBody = buildingBodies[buildingBodies.length - 1];
-
-        if(lastBuildingBody.position.x <= -buildingProp.width) {
-
-            Composite.translate(buildingComposite, { x: worldWidth + buildingCompositeMinX + buildingProp.width, y: 0 });
-
-            break;
+        if(terrainBody.bounds) {
+            if(800 - 50 > terrainBody.bounds.min.x) {
+                addTerrain();
+            }
         }
     }
 
-    var hitBuilding =  compositeBuildings.composites.filter(function(composite){
+    var hitBuilding =  compositeTerrain.composites.filter(function(composite) {
         var isHit = Query.region(composite.bodies, ship.bounds);
         return !!isHit.length;
     });
+
     var top = ship.position.y;
 
     if(hitBuilding.length || top <= 20) {
         ship.render.sprite.texture = '/images/explosion.png';
         ship.isStatic=true;
-        // Body.resetForcesAll(ship);
     }
 
 });
@@ -127,54 +101,58 @@ document.addEventListener("keydown", function(event){
 // run the engine
 Engine.run(engine);
 
-// for adding random terrain
-function addTerrain(numBodies, top) {
+function addTerrain() {
+    addTerrainPieceTop();
+    addTerrainPieceBottom();
+}
+addTerrain();
 
-    // Always have two groups of buildings
-    var numGroups = 2,
-        startPos = 0,
-        bodiesCreated = 0;
+function addTerrainPieceTop() {
 
-    for(var j = 0, len = numGroups; j < len; j++) {
+    var containerWidth = compositeTerrain.width;
+    var randomHeight = randomIntFromInterval(50, 300);
 
-        // Create a new composite to store buildings in
-        var composite = Composite.create();
-
-        // Set position for group
-        startPos = bodiesCreated;
-
-        for (var i = 0, len2 = numBodies; i < len2; i++) {
-
-            // Set random height
-            buildingProp.height = randomIntFromInterval(
-                buildingHeightRange.from,
-                buildingHeightRange.to
-            );
-
-            var yPos = top ? 0 : buildingProp.y;
-            var terrainBody = Bodies.rectangle(
-                (buildingProp.width * i) + startPos + (buildingProp.width / 2),
-                yPos,
-                buildingProp.width,
-                buildingProp.height,
-                { isStatic: true, id: "building", friction: 0.1, render: { fillStyle: j === 1 ? 'green' : 'blue' } }
-            );
-
-            terrainBodies.push(terrainBody);
-
-            // Add building to the world
-            World.add(engine.world, [terrainBody]);
-
-            // Add building to the current composite
-            Composite.addBody(composite, terrainBody);
-
-            // Bodies created
-            bodiesCreated = buildingProp.width * (i + 1);
+    var terrainBody = Bodies.rectangle(
+        825,
+        0 + (randomHeight / 2),
+        50,
+        randomIntFromInterval(150, 250),
+        {
+            isStatic: true,
+            id: "building",
+            friction: 0.1,
+            render: { fillStyle: 'blue', strokeStyle: null }
         }
+    );
 
-        // Add composite to parent
-        Composite.add(compositeBuildings, composite);
-    }
+    Composite.add(compositeTerrain, terrainBody);
+
+    // Add terrain to the world
+    World.add(engine.world, [terrainBody]);
+}
+
+function addTerrainPieceBottom() {
+
+    var containerWidth = compositeTerrain.width;
+    var randomHeight = randomIntFromInterval(50, 300);
+
+    var terrainBody = Bodies.rectangle(
+        825,
+        600 - (randomHeight / 2),
+        50,
+        randomHeight,
+        {
+            isStatic: true,
+            id: "building",
+            friction: 0.1,
+            render: { fillStyle: 'blue', strokeStyle: null }
+        }
+    );
+
+    Composite.add(compositeTerrain, terrainBody);
+
+    // Add terrain to the world
+    World.add(engine.world, [terrainBody]);
 }
 
 function randomIntFromInterval(min, max) {
@@ -182,5 +160,9 @@ function randomIntFromInterval(min, max) {
 }
 
 function moveShipUp (direction) {
-    Body.applyForce(ship, {x: 0, y: 0}, {x: 0, y: -0.1});
+    Body.applyForce(ship, {
+        x: 0, y: 0
+    }, {
+        x: 0, y: -0.1
+    });
 }
