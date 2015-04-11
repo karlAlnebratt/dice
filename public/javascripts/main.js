@@ -11,7 +11,14 @@ var Body = Matter.Body;
 var Events = Matter.Events;
 var Query = Matter.Query;
 var Composite = Matter.Composite;
+var Vector = Matter.Vector;
+
 var isRunning = true;
+var speedPanning = -3;
+var rangeTerrain = {
+    from: 50,
+    to: 220
+};
 
 // create a Matter.js engine
 var engine = Engine.create(document.body, {
@@ -20,7 +27,7 @@ var engine = Engine.create(document.body, {
             width: worldWidth,
             height: worldHeight,
             background: '/images/stars.jpg',
-            wireframes: false
+            wireframes: true
         }
     }
 });
@@ -39,7 +46,7 @@ var compositeTerrain = Composite.create();
 Events.on(engine, 'tick', function (event) {
 
     if(isRunning) {
-        Composite.translate(compositeTerrain, { x: -2, y: 0 });
+        Composite.translate(compositeTerrain, { x: speedPanning, y: 0 });
     }
 
     var terrainBodies = Composite.allBodies(compositeTerrain);
@@ -91,12 +98,15 @@ World.add(engine.world, [ship]);
 document.addEventListener("keydown", function(event){
     var key = event.which;
 
-    if(key !== 38) {
+    if(key === 38) {
+        moveShipUp();
+    } else if(key == 32) {
+        shootFromShip();
+    } else {
         return;
     }
 
     event.preventDefault();
-    moveShipUp();
 
 });
 
@@ -112,7 +122,7 @@ addTerrain();
 function addTerrainPieceTop() {
 
     var containerWidth = compositeTerrain.width;
-    var randomHeight = randomIntFromInterval(50, 150);
+    var randomHeight = randomIntFromInterval(rangeTerrain.from, rangeTerrain.to);
 
     var terrainBody = Bodies.rectangle(
         825,
@@ -123,7 +133,11 @@ function addTerrainPieceTop() {
             isStatic: true,
             id: "building",
             friction: 0.1,
-            render: { fillStyle: 'red', strokeStyle: null }
+            render: {
+                sprite: {
+                    texture: '/images/rocks_top.png'
+                }
+            }
         }
     );
 
@@ -136,7 +150,7 @@ function addTerrainPieceTop() {
 function addTerrainPieceBottom() {
 
     var containerWidth = compositeTerrain.width;
-    var randomHeight = randomIntFromInterval(50, 150);
+    var randomHeight = randomIntFromInterval(rangeTerrain.from, rangeTerrain.to);
 
     var terrainBody = Bodies.rectangle(
         825,
@@ -147,7 +161,11 @@ function addTerrainPieceBottom() {
             isStatic: true,
             id: "building",
             friction: 0.1,
-            render: { fillStyle: 'blue', strokeStyle: null }
+            render: {
+                sprite: {
+                    texture: '/images/rocks_bottom.png'
+                }
+            }
         }
     );
 
@@ -161,15 +179,55 @@ function randomIntFromInterval(min, max) {
     return Math.floor(Math.random() * (max - min + 1) + min);
 }
 
-function moveShipUp (direction) {
-    Body.applyForce(ship, {
-        x: 0, y: 0
+function shootFromShip() {
+    var boundsShip = ship.bounds;
+
+    var laser = Bodies.rectangle(
+        boundsShip.min.x,
+        boundsShip.min.y,
+        50,
+        5,
+        {
+            density: 0.001,
+            friction: 0,
+            frictionAir: 0,
+            angle: 45 * (Math.PI / 180),
+            render: {
+                fillStyle: 'green',
+                strokeStyle: 'green'
+            },
+            collisionFilter: {
+                mask: null
+            }
+        }
+    );
+
+    Body.applyForce(laser, {
+        x: boundsShip.min.x,
+        y: boundsShip.min.y
     }, {
-        x: 0, y: -0.1
+        x: 0,
+        y: -0.01
     });
+
+    World.add(engine.world, [laser]);
+
+    console.log('SHOOT!');
 }
 
-var shipCategory = 0x0001;
+function moveShipUp(direction) {
+    var forcePoint = {
+        x: -0.09,
+        y: 0
+    };
+
+    var rotatedForcePoint = Vector.rotate(forcePoint, ship.angle);
+
+    Body.applyForce(ship, {
+        x: 0, y: 0
+    }, rotatedForcePoint);
+}
+
 
 function shootMissile() {
     var randomPos = randomIntFromInterval(0, 800);
@@ -182,10 +240,15 @@ function shootMissile() {
         {
             mass: 10,
             friction: 0,
+            torque: 0.15,
             collisionFilter: {
                 mask: null
             },
-            render: { fillStyle: 'green', strokeStyle: 'green' }
+            render: {
+                sprite: {
+                    texture: '/images/missile.png'
+                }
+            }
         }
     );
 
