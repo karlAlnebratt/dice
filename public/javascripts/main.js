@@ -39,7 +39,8 @@ var terrainBodies = [],
 var compositeBuildings = Composite.create();
 
 // add some terrain
-addTerrain(20);
+addTerrain(20, true);
+addTerrain(20, false);
 
 // Get width of composite by last body position and width
 var buildingComposites = Composite.allComposites(compositeBuildings);
@@ -48,7 +49,6 @@ var buildingBodies = Composite.allBodies(buildingComposite);
 var lastBuildingBody = buildingBodies[buildingBodies.length - 1];
 var buildingCompositeMinX = lastBuildingBody.bounds.min.x;
 
-console.log(buildingCompositeMinX);
 
 // apply force to terrain bodies
 Events.on(engine, 'tick', function (event) {
@@ -83,31 +83,34 @@ Events.on(engine, 'tick', function (event) {
         }
     }
 
-    var hitground = Query.region([ship], ground.bounds);
+    var hitBuilding =  compositeBuildings.composites.filter(function(composite){
+        var isHit = Query.region(composite.bodies, ship.bounds);
+        return !!isHit.length;
+    });
     var top = ship.position.y;
 
-    if(hitground.length || top <= 20) {
+    if(hitBuilding.length || top <= 20) {
         ship.render.sprite.texture = '/images/explosion.png';
-        ship.isStatic=true
+        ship.isStatic=true;
         // Body.resetForcesAll(ship);
     }
 
 });
 
 // create two boxes and a ground
-var ship = Bodies.rectangle(400, 60, 40, 40, {
+var ship = Bodies.rectangle(400, 320, 40, 40, {
     id: "ship",
-    frictionAir: 0.05,
+    frictionAir: 0.1,
     render: {
         sprite: {
             texture: '/images/ship.png'
         }
     }
 });
-var ground = Bodies.rectangle(400, 610, 810, 60, { isStatic: true });
+
 
 // add all of the bodies to the world
-World.add(engine.world, [ship, ground]);
+World.add(engine.world, [ship]);
 
 document.addEventListener("keydown", function(event){
     var key = event.which;
@@ -125,7 +128,7 @@ document.addEventListener("keydown", function(event){
 Engine.run(engine);
 
 // for adding random terrain
-function addTerrain(numBodies) {
+function addTerrain(numBodies, top) {
 
     // Always have two groups of buildings
     var numGroups = 2,
@@ -148,9 +151,10 @@ function addTerrain(numBodies) {
                 buildingHeightRange.to
             );
 
+            var yPos = top ? 0 : buildingProp.y;
             var terrainBody = Bodies.rectangle(
                 (buildingProp.width * i) + startPos + (buildingProp.width / 2),
-                buildingProp.y,
+                yPos,
                 buildingProp.width,
                 buildingProp.height,
                 { isStatic: true, id: "building", friction: 0.1, render: { fillStyle: j === 1 ? 'green' : 'blue' } }
