@@ -26,17 +26,18 @@ var engine = Engine.create(document.body, {
 });
 
 // references for terrain
-var terrainBodies = [],
-    buildingProp = {
-        width: 40,
-        height: null,
-        y: 600
-    };
+var terrainBodies = [];
+var missiles = [];
+var buildingProp = {
+    width: 40,
+    height: null,
+    y: 600
+};
 
 var compositeTerrain = Composite.create();
 
 // apply force to terrain bodies
-Events.on(engine, 'tick', function (event) {
+var tickEvent = Events.on(engine, 'tick', function (event) {
 
     if(isRunning) {
         Composite.translate(compositeTerrain, { x: -2, y: 0 });
@@ -60,13 +61,19 @@ Events.on(engine, 'tick', function (event) {
         }
     }
 
-    var isHit = Query.region(terrainBodies, ship.bounds);
+    var isTerreinHit = Query.region(terrainBodies, ship.bounds);
+    var isMissileHit = Query.region(missiles, ship.bounds);
     var posY = ship.position.y;
 
-    if(!!isHit.length || posY >= 580 || posY <= 20) {
+    if((!!isTerreinHit.length || !!isMissileHit.length || posY >= 580 || posY <= 20) && isRunning) {
         ship.render.sprite.texture = '/images/explosion.png';
         ship.isStatic = true;
         isRunning = false;
+        setTimeout(function() {
+            World.clear(engine.world);
+            Engine.clear(engine);
+            Events.off(engine, tickEvent);
+        }, 500);
     }
 
 });
@@ -91,12 +98,17 @@ World.add(engine.world, [ship]);
 document.addEventListener("keydown", function(event){
     var key = event.which;
 
-    if(key !== 38) {
-        return;
-    }
+    if(key === 38) {
+        event.preventDefault();
+        moveShipUp();
+    } else if (key  === 37) {
+        event.preventDefault();
+        moveShipUpBack();
+    } else if (key === 39) {
+        event.preventDefault();
+        moveShipUpForward();
 
-    event.preventDefault();
-    moveShipUp();
+    }
 
 });
 
@@ -161,11 +173,31 @@ function randomIntFromInterval(min, max) {
     return Math.floor(Math.random() * (max - min + 1) + min);
 }
 
+function rotate() {
+
+}
+
 function moveShipUp (direction) {
     Body.applyForce(ship, {
         x: 0, y: 0
     }, {
         x: 0, y: -0.1
+    });
+}
+
+function moveShipUpBack (direction) {
+    Body.applyForce(ship, {
+        x: 0, y: 0
+    }, {
+        x: -0.1, y: 0
+    });
+}
+
+function moveShipUpForward (direction) {
+    Body.applyForce(ship, {
+        x: 0, y: 0
+    }, {
+        x: 0.1 , y: 0
     });
 }
 
@@ -198,10 +230,13 @@ function shootMissile() {
     });
 
     World.add(engine.world, [missile]);
+    missiles.push(missile);
 
 }
 shootMissile();
 
 setInterval(function() {
-    shootMissile();
+    if(isRunning) {
+        shootMissile();
+    }
 }, 2000);
