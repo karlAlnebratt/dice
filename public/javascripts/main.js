@@ -228,7 +228,7 @@ function moveShipUp (direction) {
     Body.applyForce(ship, {
         x: 0, y: 0
     }, {
-        x: 0 , y: -0.05
+        x: 0 , y: -0.07
     });
 }
 
