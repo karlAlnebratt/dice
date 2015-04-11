@@ -108,9 +108,9 @@ document.addEventListener("keydown", function(event){
     if(key === 38) {
         moveShipUp();
     } else if (key  === 37) {
-        moveShipUpBack();
+        moveShipBack();
     } else if (key === 39) {
-        moveShipUpForward();
+        moveShipForward();
     } else if(key === 32) {
         shootFromShip();
     } else {
@@ -224,31 +224,27 @@ function shootFromShip() {
     World.add(engine.world, [laser]);
 }
 
-function rotate() {
-
-}
-
 function moveShipUp (direction) {
     Body.applyForce(ship, {
         x: 0, y: 0
     }, {
-        x: 0 , y: -0.1
+        x: 0 , y: -0.05
     });
 }
 
-function moveShipUpBack (direction) {
+function moveShipBack (direction) {
     Body.applyForce(ship, {
         x: 0, y: 0
     }, {
-        x: -0.1, y: 0
+        x: -0.05, y: 0
     });
 }
 
-function moveShipUpForward (direction) {
+function moveShipForward (direction) {
     Body.applyForce(ship, {
         x: 0, y: 0
     }, {
-        x: 0.1 , y: 0
+        x: 0.05 , y: 0
     });
 }
 
