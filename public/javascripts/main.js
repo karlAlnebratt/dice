@@ -27,7 +27,7 @@ var engine = Engine.create(document.body, {
             width: worldWidth,
             height: worldHeight,
             background: '/images/stars.jpg',
-            wireframes: true
+            wireframes: false
         }
     }
 });
@@ -185,16 +185,16 @@ function shootFromShip() {
     var laser = Bodies.rectangle(
         boundsShip.min.x,
         boundsShip.min.y,
-        50,
+        5,
         5,
         {
             density: 0.001,
             friction: 0,
             frictionAir: 0,
-            angle: 45 * (Math.PI / 180),
+            angle: randomIntFromInterval(-360, 360) * (Math.PI / 180),
             render: {
-                fillStyle: 'green',
-                strokeStyle: 'green'
+                fillStyle: 'white',
+                strokeStyle: 'white'
             },
             collisionFilter: {
                 mask: null
@@ -206,13 +206,11 @@ function shootFromShip() {
         x: boundsShip.min.x,
         y: boundsShip.min.y
     }, {
-        x: 0,
-        y: -0.01
+        x: 0.0005,
+        y: -0.0005
     });
 
     World.add(engine.world, [laser]);
-
-    console.log('SHOOT!');
 }
 
 function moveShipUp(direction) {
