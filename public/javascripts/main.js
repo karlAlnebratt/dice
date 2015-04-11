@@ -1,8 +1,8 @@
 "use strict";
 
 // Matter.js module aliases
-var worldWidth = 800;
-var worldHeight = 600;
+var worldWidth = 1440;
+var worldHeight = 778;
 
 var Engine = Matter.Engine;
 var World = Matter.World;
@@ -27,19 +27,21 @@ var engine = Engine.create(document.body, {
             width: worldWidth,
             height: worldHeight,
             background: '/images/stars.jpg',
-            wireframes: false
+            wireframes: true
         }
+    }
+});
+
+var world = World.create({
+    bounds: {
+        max: { x: 800, y:  }
     }
 });
 
 // references for terrain
 var terrainBodies = [];
 var missiles = [];
-var buildingProp = {
-    width: 40,
-    height: null,
-    y: 600
-};
+var laserShots = [];
 
 var compositeTerrain = Composite.create();
 
@@ -62,7 +64,7 @@ var tickEvent = Events.on(engine, 'tick', function (event) {
         }
 
         if(terrainBody.bounds) {
-            if(800 - 50 > terrainBody.bounds.min.x) {
+            if(worldWidth - 50 > terrainBody.bounds.min.x) {
                 addTerrain();
             }
         }
@@ -70,22 +72,42 @@ var tickEvent = Events.on(engine, 'tick', function (event) {
 
     var isTerreinHit = Query.region(terrainBodies, ship.bounds);
     var isMissileHit = Query.region(missiles, ship.bounds);
-    var posY = ship.position.y;
 
-    if((!!isTerreinHit.length || !!isMissileHit.length || posY >= 580 || posY <= 20) && isRunning) {
+    laserShots.forEach(function(laser) {
+        var isMissileHitByLaser = Query.region(missiles, laser.bounds);
+
+        isMissileHitByLaser.forEach(function(missileToRemove) {
+            World.remove(engine.world, missileToRemove);
+        });
+    });
+
+    var posY = ship.position.y;
+    var posX = ship.position.x;
+    var isShipInViewport = posY >= worldHeight - 20 || posY <= 20 || posX <= 20 || posX >= worldWidth - 20;
+
+    if((!!isTerreinHit.length || !!isMissileHit.length || isShipInViewport) && isRunning) {
+        isMissileHit.forEach(function(missileToRemove) {
+            World.remove(engine.world, missileToRemove);
+        });
+
         ship.render.sprite.texture = '/images/explosion.png';
         ship.isStatic = true;
         isRunning = false;
+
+        // You're dead!
         setTimeout(function() {
             World.clear(engine.world);
             Engine.clear(engine);
             Events.off(engine, tickEvent);
+
+            alert('Game over!');
+
         }, 500);
     }
 
 });
 
-// create two boxes and a ground
+// create a spaceship!
 var ship = Bodies.rectangle(400, 320, 40, 40, {
     id: "ship",
     frictionAir: 0.1,
@@ -98,10 +120,10 @@ var ship = Bodies.rectangle(400, 320, 40, 40, {
     }
 });
 
-
-// add all of the bodies to the world
+// add ship to the world
 World.add(engine.world, [ship]);
 
+// keypress events
 var keyPressed;
 
 document.addEventListener("keyup", function(event){
@@ -111,34 +133,36 @@ document.addEventListener("keyup", function(event){
 document.addEventListener("keydown", function(event){
     var key = event.which;
 
-
-    if(key === 38) {
-        event.preventDefault();
-        moveShipUp();
-    } else if (key  === 37) {
-        event.preventDefault();
-        moveShipBack();
-    } else if (key === 39) {
-        event.preventDefault();
-        moveShipForward();
-    } else if(key === 32 && keyPressed !== key) {
-        event.preventDefault();
-        shootFromShip();
-    } else {
-        return;
+    if(isRunning) {
+        if(key === 38) {
+            event.preventDefault();
+            moveShipUp();
+        } else if (key  === 37) {
+            event.preventDefault();
+            moveShipBack();
+        } else if (key === 39) {
+            event.preventDefault();
+            moveShipForward();
+        } else if(key === 32 && keyPressed !== key) {
+            event.preventDefault();
+            shootFromShip();
+        } else {
+            return;
+        }
     }
 
     keyPressed = key;
-
 });
 
 // run the engine
 Engine.run(engine);
 
 function addTerrain() {
-    addTerrainPieceTop();
-    addTerrainPieceBottom();
+//    addTerrainPieceTop();
+//    addTerrainPieceBottom();
 }
+
+// add some terrain
 addTerrain();
 
 function addTerrainPieceTop() {
@@ -147,7 +171,7 @@ function addTerrainPieceTop() {
     var randomHeight = randomIntFromInterval(rangeTerrain.from, rangeTerrain.to);
 
     var terrainBody = Bodies.rectangle(
-        825,
+        worldWidth + 25,
         0 + randomHeight / 2,
         50,
         randomHeight,
@@ -175,8 +199,8 @@ function addTerrainPieceBottom() {
     var randomHeight = randomIntFromInterval(rangeTerrain.from, rangeTerrain.to);
 
     var terrainBody = Bodies.rectangle(
-        825,
-        600 - (randomHeight / 2),
+        worldWidth + 25,
+        worldHeight - (randomHeight / 2),
         50,
         randomHeight,
         {
@@ -201,12 +225,13 @@ function randomIntFromInterval(min, max) {
     return Math.floor(Math.random() * (max - min + 1) + min);
 }
 
+// shoot some laser
 function shootFromShip() {
     var boundsShip = ship.bounds;
 
     var laser = Bodies.rectangle(
-        boundsShip.min.x,
-        boundsShip.min.y,
+        boundsShip.min.x + 20,
+        boundsShip.min.y + 20,
         5,
         5,
         {
@@ -233,13 +258,15 @@ function shootFromShip() {
     });
 
     World.add(engine.world, [laser]);
+
+    laserShots.push(laser);
 }
 
 function moveShipUp (direction) {
     Body.applyForce(ship, {
         x: 0, y: 0
     }, {
-        x: 0 , y: -0.07
+        x: 0 , y: -0.1
     });
 }
 
@@ -247,7 +274,7 @@ function moveShipBack (direction) {
     Body.applyForce(ship, {
         x: 0, y: 0
     }, {
-        x: -0.05, y: 0
+        x: -0.1, y: 0
     });
 }
 
@@ -255,17 +282,17 @@ function moveShipForward (direction) {
     Body.applyForce(ship, {
         x: 0, y: 0
     }, {
-        x: 0.05 , y: 0
+        x: 0.1 , y: 0
     });
 }
 
-
+// shoot some missile
 function shootMissile() {
-    var randomPos = randomIntFromInterval(0, 800);
+    var randomPos = randomIntFromInterval(0, worldWidth);
 
     var missile = Bodies.rectangle(
         randomPos,
-        600,
+        worldHeight - 50,
         25,
         50,
         {
@@ -285,20 +312,22 @@ function shootMissile() {
 
     Body.applyForce(missile, {
         x: randomPos,
-        y: 600
+        y: worldHeight
     }, {
         x: 0,
-        y: -0.9
+        y: -5
     });
 
     World.add(engine.world, [missile]);
     missiles.push(missile);
 
 }
-shootMissile();
 
-setInterval(function() {
-    if(isRunning) {
-        shootMissile();
-    }
-}, 2000);
+// some missile interval shooting
+setTimeout(function() {
+    setInterval(function() {
+        if(isRunning) {
+            shootMissile();
+        }
+    }, 2000);
+}, 1000);
