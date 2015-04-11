@@ -11,6 +11,7 @@ var Body = Matter.Body;
 var Events = Matter.Events;
 var Query = Matter.Query;
 var Composite = Matter.Composite;
+var isRunning = true;
 
 // create a Matter.js engine
 var engine = Engine.create(document.body, {
@@ -37,7 +38,9 @@ var compositeTerrain = Composite.create();
 // apply force to terrain bodies
 Events.on(engine, 'tick', function (event) {
 
-    Composite.translate(compositeTerrain, { x: -2, y: 0 });
+    if(isRunning) {
+        Composite.translate(compositeTerrain, { x: -2, y: 0 });
+    }
 
     var terrainBodies = Composite.allBodies(compositeTerrain);
 
@@ -57,16 +60,12 @@ Events.on(engine, 'tick', function (event) {
         }
     }
 
-    var hitBuilding =  compositeTerrain.composites.filter(function(composite) {
-        var isHit = Query.region(composite.bodies, ship.bounds);
-        return !!isHit.length;
-    });
-
-    var top = ship.position.y;
-
-    if(hitBuilding.length || top <= 20) {
+    var isHit = Query.region(terrainBodies, ship.bounds);
+    var posY = ship.position.y;
+    if(!!isHit.length || posY >= 580 || posY <= 20) {
         ship.render.sprite.texture = '/images/explosion.png';
-        ship.isStatic=true;
+        ship.isStatic = true;
+        isRunning = false;
     }
 
 });
