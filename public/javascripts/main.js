@@ -30,7 +30,7 @@ var terrainBodies = [],
         width: 40,
         height: null,
         y: 600
-    }
+    };
 
 var compositeTerrain = Composite.create();
 
@@ -110,18 +110,18 @@ addTerrain();
 function addTerrainPieceTop() {
 
     var containerWidth = compositeTerrain.width;
-    var randomHeight = randomIntFromInterval(50, 300);
+    var randomHeight = randomIntFromInterval(50, 150);
 
     var terrainBody = Bodies.rectangle(
         825,
-        0 + (randomHeight / 2),
+        0 + randomHeight / 2,
         50,
-        randomIntFromInterval(150, 250),
+        randomHeight,
         {
             isStatic: true,
             id: "building",
             friction: 0.1,
-            render: { fillStyle: 'blue', strokeStyle: null }
+            render: { fillStyle: 'red', strokeStyle: null }
         }
     );
 
@@ -134,7 +134,7 @@ function addTerrainPieceTop() {
 function addTerrainPieceBottom() {
 
     var containerWidth = compositeTerrain.width;
-    var randomHeight = randomIntFromInterval(50, 300);
+    var randomHeight = randomIntFromInterval(50, 150);
 
     var terrainBody = Bodies.rectangle(
         825,
