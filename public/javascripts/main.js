@@ -102,22 +102,33 @@ var ship = Bodies.rectangle(400, 320, 40, 40, {
 // add all of the bodies to the world
 World.add(engine.world, [ship]);
 
+var keyPressed;
+
+document.addEventListener("keyup", function(event){
+    keyPressed = null;
+});
+
 document.addEventListener("keydown", function(event){
     var key = event.which;
 
+
     if(key === 38) {
+        event.preventDefault();
         moveShipUp();
     } else if (key  === 37) {
+        event.preventDefault();
         moveShipBack();
     } else if (key === 39) {
+        event.preventDefault();
         moveShipForward();
-    } else if(key === 32) {
+    } else if(key === 32 && keyPressed !== key) {
+        event.preventDefault();
         shootFromShip();
     } else {
         return;
     }
 
-    event.preventDefault();
+    keyPressed = key;
 
 });
 
