@@ -17,7 +17,7 @@ var isRunning = true;
 var speedPanning = -3;
 var rangeTerrain = {
     from: 50,
-    to: 220
+    to: 250
 };
 
 // create a Matter.js engine
@@ -32,11 +32,11 @@ var engine = Engine.create(document.body, {
     }
 });
 
-var world = World.create({
-    bounds: {
-        max: { x: 800, y:  }
-    }
-});
+var world = engine.world;
+world.bounds.max = {
+    x: worldWidth,
+    y: worldHeight
+};
 
 // references for terrain
 var terrainBodies = [];
@@ -158,8 +158,8 @@ document.addEventListener("keydown", function(event){
 Engine.run(engine);
 
 function addTerrain() {
-//    addTerrainPieceTop();
-//    addTerrainPieceBottom();
+   addTerrainPieceTop();
+   addTerrainPieceBottom();
 }
 
 // add some terrain
@@ -171,7 +171,7 @@ function addTerrainPieceTop() {
     var randomHeight = randomIntFromInterval(rangeTerrain.from, rangeTerrain.to);
 
     var terrainBody = Bodies.rectangle(
-        worldWidth + 25,
+        worldWidth + 20,
         0 + randomHeight / 2,
         50,
         randomHeight,
@@ -253,8 +253,8 @@ function shootFromShip() {
         x: boundsShip.min.x,
         y: boundsShip.min.y
     }, {
-        x: 0.0005,
-        y: -0.0005
+        x: 0.0009,
+        y: -0.0009
     });
 
     World.add(engine.world, [laser]);
@@ -292,7 +292,7 @@ function shootMissile() {
 
     var missile = Bodies.rectangle(
         randomPos,
-        worldHeight - 50,
+        worldHeight,
         25,
         50,
         {
@@ -315,7 +315,7 @@ function shootMissile() {
         y: worldHeight
     }, {
         x: 0,
-        y: -5
+        y: -1
     });
 
     World.add(engine.world, [missile]);
